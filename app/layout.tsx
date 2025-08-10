@@ -1,6 +1,5 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import type { Viewport } from 'next/types'; // ✅ correct import for latest Next.js
 import { Inter } from 'next/font/google';
 import { PWAProvider } from '@/providers/pwa-provider';
 import { ToastProvider } from '@/providers/toast-provider';
@@ -31,7 +30,8 @@ export const metadata: Metadata = {
   },
 };
 
-export const viewport: Viewport = {
+// ✅ No type import — just export plain object
+export const viewport = {
   themeColor: '#2563eb',
   width: 'device-width',
   initialScale: 1,
