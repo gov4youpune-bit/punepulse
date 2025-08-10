@@ -9,8 +9,8 @@ import { cookies } from 'next/headers';
  * POST /api/attachments
  *
  * Accepts either:
- *  - { filename: 'abc.jpg', contentType: 'image/jpeg' }   <-- preferred (frontend sends this)
- *  - { bucket: 'my-bucket', filePath: 'complaints/abc.jpg' }  <-- legacy/explicit
+ *  - { filename: 'abc.jpg', contentType: 'image/jpeg' }
+ *  - { bucket: 'my-bucket', filePath: 'complaints/abc.jpg' }
  *
  * Returns:
  *  { uploadUrl: string, key: string }
@@ -18,7 +18,6 @@ import { cookies } from 'next/headers';
 export async function POST(req: Request) {
   try {
     const supabase = createRouteHandlerClient({ cookies });
-
     const body = await req.json();
 
     // Resolve bucket
@@ -28,80 +27,37 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Storage bucket not configured' }, { status: 500 });
     }
 
-    // If caller provided full filePath, use that (keeps backward compatibility)
+    // Resolve filePath
     let filePath: string | undefined = body.filePath || body.path;
-
-    // If filename provided, create a stable file path (prefix with complaints/ and timestamp)
     if (!filePath && body.filename) {
       const filename = String(body.filename).trim().replace(/\s+/g, '_');
-      const now = Date.now();
-      // ensure simple unique key — you can change folder structure as desired
-      filePath = `complaints/${now}-${filename}`;
+      filePath = `complaints/${Date.now()}-${filename}`;
     }
-
     if (!filePath) {
       return NextResponse.json({ error: 'filePath/path or filename required' }, { status: 400 });
     }
 
-    // Optionally you can set an expiresIn (seconds) for signed upload URL.
-    // Supabase storage createSignedUploadUrl signature varies by version:
-    // - some versions accept (path, expiresInSeconds)
-    // - other versions might accept options. We attempt call that works more widely:
-    // Try createSignedUploadUrl(path, expiresInSeconds) first, fallback to options if needed.
-    let signedData: any = null;
-    let signedError: any = null;
+    // Create signed upload URL (object form works on latest clients)
+    const { data, error } = await supabase
+      .storage
+      .from(bucket)
+      .createSignedUploadUrl(filePath, { upsert: true });
 
-    // First try numeric expiresIn (60 seconds)
-    try {
-      const res = await supabase.storage.from(bucket).createSignedUploadUrl(filePath, 60);
-      // supabase client returns { data, error }
-      if (res.error) {
-        signedError = res.error;
-      } else {
-        signedData = res.data;
-      }
-    } catch (e) {
-      // If the above signature isn't supported, try the object form (some versions expect { upsert: boolean })
-      try {
-        const res2 = await supabase.storage.from(bucket).createSignedUploadUrl(filePath, { upsert: true });
-        if (res2.error) {
-          signedError = res2.error;
-        } else {
-          signedData = res2.data;
-        }
-      } catch (e2) {
-        signedError = e2;
-      }
+    if (error) {
+      console.error('Storage error (createSignedUploadUrl):', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    if (signedError) {
-      console.error('Storage error (createSignedUploadUrl):', signedError);
-      // try to return a helpful message
-      const message = (signedError && signedError.message) ? signedError.message : String(signedError);
-      return NextResponse.json({ error: `Failed to create signed upload URL: ${message}` }, { status: 500 });
-    }
-
-    // signedData shape may differ across versions: check common keys
-    // e.g. { signedUploadUrl } or { signedUrl } or { uploadUrl } or { signedURL }
-    const uploadUrl =
-      signedData?.signedUploadUrl ||
-      signedData?.signedUrl ||
-      signedData?.uploadUrl ||
-      signedData?.signedURL ||
-      signedData?.signed_url ||
-      null;
+    const uploadUrl = data?.signedUrl || null;
 
     if (!uploadUrl) {
-      // If structure unexpected, return the whole signedData to help debugging
-      console.warn('Unexpected createSignedUploadUrl response shape', signedData);
-      return NextResponse.json({ error: 'Unexpected storage response', data: signedData }, { status: 500 });
+      console.warn('Unexpected createSignedUploadUrl response shape', data);
+      return NextResponse.json({ error: 'Unexpected storage response', data }, { status: 500 });
     }
 
-    // Return the signed upload URL and the storage key (filePath) to the client
     return NextResponse.json({ uploadUrl, key: filePath }, { status: 200 });
   } catch (err) {
     console.error('Unexpected error in attachments route:', err);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
-  
