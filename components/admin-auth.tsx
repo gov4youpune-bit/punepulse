@@ -95,7 +95,7 @@ export function AdminAuth() {
                 <Mail className="w-6 h-6 text-green-600" />
               </div>
               <h3 className="text-lg font-medium mb-2">Check your email</h3>
-              <p className="text-gray-600 mb-4">We've sent a magic link to <strong>{email}</strong></p>
+              <p className="text-gray-600 mb-4">We&apos;ve sent a magic link to <strong>{email}</strong></p>
               <Button variant="outline" onClick={() => setEmailSent(false)} className="w-full">
                 Try different email
               </Button>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { MapPin, Navigation, Check, ArrowLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -25,18 +25,14 @@ export function LocationCapture({ onNext, onBack }: LocationCaptureProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [useManual, setUseManual] = useState(false);
-  
-  const mapRef = useRef<HTMLDivElement>(null);
+
+  const mapRef = useRef<HTMLDivElement | null>(null);
   const { setLocation: setStoreLocation } = useComplaintStore();
-  
+
   // Default location (Pune city center)
   const defaultLocation = { lat: 18.5204, lng: 73.8567 };
 
-  useEffect(() => {
-    getCurrentLocation();
-  }, []);
-
-  const getCurrentLocation = async () => {
+  const getCurrentLocation = useCallback(async () => {
     if (!navigator.geolocation) {
       setError('Geolocation is not supported by this browser');
       return;
@@ -54,51 +50,52 @@ export function LocationCapture({ onNext, onBack }: LocationCaptureProps) {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude, accuracy } = position.coords;
-        const newLocation = { 
-          lat: latitude, 
-          lng: longitude, 
-          accuracy 
+        const newLocation = {
+          lat: latitude,
+          lng: longitude,
+          accuracy
         };
-        
+
         setLocation(newLocation);
-        
+
         // Try to get address from coordinates
         try {
-          const address = await reverseGeocode(latitude, longitude);
-          setLocation(prev => prev ? { ...prev, address } : null);
+          // reverse geocode inline to avoid extra deps
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
+          );
+
+          if (res.ok) {
+            const data = await res.json();
+            const address = data.display_name || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+            setLocation(prev => prev ? { ...prev, address } : { lat: latitude, lng: longitude, accuracy, address });
+          }
         } catch (err) {
           console.error('Reverse geocoding failed:', err);
         }
-        
+
         setIsLoading(false);
       },
-      (error) => {
-        console.error('Geolocation error:', error);
-        setError(`Location access denied: ${error.message}`);
+      (errorPos) => {
+        console.error('Geolocation error:', errorPos);
+        setError(`Location access denied: ${errorPos.message}`);
         setLocation(defaultLocation);
         setIsLoading(false);
       },
       options
     );
-  };
+  }, []);
 
-  const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
-    // Using OpenStreetMap Nominatim (free reverse geocoding)
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
-    );
-    
-    if (!response.ok) throw new Error('Geocoding failed');
-    
-    const data = await response.json();
-    return data.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-  };
+  // include getCurrentLocation in deps
+  useEffect(() => {
+    getCurrentLocation();
+  }, [getCurrentLocation]);
 
   const handleConfirm = () => {
     if (useManual && manualAddress.trim()) {
       setStoreLocation({
-        lat: null,
-        lng: null,
+        lat: null as any,
+        lng: null as any,
         address: manualAddress.trim()
       });
     } else if (location) {
@@ -205,7 +202,7 @@ export function LocationCapture({ onNext, onBack }: LocationCaptureProps) {
             }}
             className="mb-2"
           />
-          
+
           <p className="text-xs text-gray-500">
             Example: Near ABC School, XYZ Road, Kothrud, Pune
           </p>
@@ -214,7 +211,7 @@ export function LocationCapture({ onNext, onBack }: LocationCaptureProps) {
         {/* Map Preview */}
         <Card className="p-4">
           <h3 className="font-medium mb-3">Location Preview</h3>
-          <div 
+          <div
             className="w-full h-48 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center"
             ref={mapRef}
           >
@@ -235,8 +232,8 @@ export function LocationCapture({ onNext, onBack }: LocationCaptureProps) {
 
         {/* Confirm Button */}
         <div className="pt-4">
-          <Button 
-            className="w-full" 
+          <Button
+            className="w-full"
             size="lg"
             onClick={handleConfirm}
             disabled={!location && !manualAddress.trim()}
@@ -244,7 +241,7 @@ export function LocationCapture({ onNext, onBack }: LocationCaptureProps) {
             <Check className="w-5 h-5 mr-2" />
             Confirm Location
           </Button>
-          
+
           {(!location && !manualAddress.trim()) && (
             <p className="text-sm text-orange-600 mt-2 text-center">
               Please allow GPS access or enter manual location

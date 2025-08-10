@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import Image from 'next/image';
 import { Camera, RotateCcw, Check, X, Upload, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -17,23 +18,19 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
-  
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const { setImages } = useComplaintStore();
 
+  // startCamera doesn't reference `stream` state directly (cleanup handles stopping)
   const startCamera = useCallback(async (facing: 'user' | 'environment' = 'environment') => {
     try {
       setError(null);
       setIsLoading(true);
-      
-      // Stop existing stream
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-      
+
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: facing,
@@ -41,10 +38,10 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
           height: { ideal: 1080 }
         }
       });
-      
+
       setStream(mediaStream);
       setFacingMode(facing);
-      
+
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
       }
@@ -54,40 +51,45 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [stream]);
+  }, []);
 
+  // ensure startCamera is included in deps
   useEffect(() => {
     startCamera();
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+      // Stop any active stream from the video element (most robust)
+      const s = videoRef.current?.srcObject as MediaStream | null;
+      if (s) {
+        s.getTracks().forEach(track => track.stop());
       }
     };
-  }, []);
+  }, [startCamera]);
 
   const captureImage = useCallback(() => {
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    
+    const canvas = canvasRef.current ?? document.createElement('canvas');
+
     if (!video || !canvas) return;
-    
+
     const context = canvas.getContext('2d');
     if (!context) return;
-    
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    
+
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
+
     const imageDataUrl = canvas.toDataURL('image/jpeg', 0.8);
     setCapturedImage(imageDataUrl);
-    
-    // Stop camera stream after capture
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
+
+    // Stop camera stream after capture (use video.srcObject)
+    const s = video.srcObject as MediaStream | null;
+    if (s) {
+      s.getTracks().forEach(track => track.stop());
+      video.srcObject = null;
       setStream(null);
     }
-  }, [stream]);
+  }, []);
 
   const retakePhoto = () => {
     setCapturedImage(null);
@@ -108,6 +110,9 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
           const file = new File([blob], `complaint-photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
           setImages([file]);
           onNext();
+        })
+        .catch(err => {
+          console.error('Failed to convert captured image to file', err);
         });
     }
   };
@@ -121,7 +126,7 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
         setCapturedImage(e.target?.result as string);
       };
       reader.readAsDataURL(files[0]);
-      
+
       setImages(files);
     }
   };
@@ -168,7 +173,7 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
               muted
               className="w-full h-screen object-cover"
             />
-            
+
             {/* Camera Controls */}
             <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/70 to-transparent">
               <div className="flex items-center justify-center space-x-8">
@@ -181,7 +186,7 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
                 >
                   <RotateCcw className="w-6 h-6" />
                 </Button>
-                
+
                 <Button
                   size="lg"
                   onClick={captureImage}
@@ -190,7 +195,7 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
                 >
                   <Camera className="w-8 h-8" />
                 </Button>
-                
+
                 <Button
                   variant="ghost"
                   size="lg"
@@ -200,7 +205,7 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
                   <Upload className="w-6 h-6" />
                 </Button>
               </div>
-              
+
               <p className="text-white/80 text-center mt-4 text-sm">
                 Tap to capture or upload photo of the issue
               </p>
@@ -208,12 +213,16 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
           </>
         ) : (
           <>
-            <img
-              src={capturedImage}
-              alt="Captured complaint"
-              className="w-full h-screen object-cover"
-            />
-            
+            <div className="w-full h-screen relative">
+              <Image
+                src={capturedImage}
+                alt="Captured complaint"
+                fill
+                style={{ objectFit: 'cover' }}
+                sizes="(max-width: 768px) 100vw, 100vw"
+              />
+            </div>
+
             {/* Confirm Controls */}
             <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/70 to-transparent">
               <div className="flex items-center justify-center space-x-8">
@@ -226,7 +235,7 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
                   <X className="w-5 h-5 mr-2" />
                   Retake
                 </Button>
-                
+
                 <Button
                   size="lg"
                   onClick={confirmPhoto}
@@ -249,9 +258,9 @@ export function CameraCapture({ onNext, onBack }: CameraCaptureProps) {
         onChange={handleFileUpload}
         className="hidden"
       />
-      
+
       {/* Hidden canvas for image processing */}
-      <canvas ref={canvasRef} className="hidden" />
+      <canvas ref={canvasRef as any} className="hidden" />
     </div>
   );
 }

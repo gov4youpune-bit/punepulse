@@ -1,39 +1,59 @@
-import { NextRequest, NextResponse } from 'next/server';
+// app/api/attachments/route.ts
+import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-export async function POST(request: NextRequest) {
+/**
+ * POST
+ * Request body:
+ * { filename: string, contentType?: string }
+ *
+ * Response:
+ * { uploadUrl: string, key: string }
+ */
+export async function POST(request: Request) {
   try {
-    const { filename, contentType } = await request.json();
-    if (!filename || !contentType) {
-      return NextResponse.json({ error: 'Filename and content type are required' }, { status: 400 });
+    const body = await request.json();
+    const { filename, contentType } = body ?? {};
+
+    if (!filename || typeof filename !== 'string') {
+      return NextResponse.json({ error: 'filename is required' }, { status: 400 });
     }
 
-    const timestamp = Date.now();
-    const randomId = Math.random().toString(36).substring(2, 15);
-    const fileExtension = filename.split('.').pop();
-    const uniqueFilename = `${timestamp}-${randomId}.${fileExtension}`;
+    // Bucket name (fallback to same bucket env used elsewhere)
+    const bucket = process.env.NEXT_PUBLIC_STORAGE_BUCKET || 'complaint-attachments';
 
-    const bucket = process.env.NEXT_PUBLIC_STORAGE_BUCKET!;
-    const path: string = `complaints/${uniqueFilename}`;
-    const expiresIn: number = 60 * 60;
+    // Make a safe, unique key/path for the file.
+    // You can change this pattern to suit your storage layout.
+    const key = `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${filename.replace(/\s+/g, '_')}`;
 
+    // expiry in seconds (5 minutes)
+    const expiresIn = 60 * 5;
+
+    // IMPORTANT: pass an options object instead of a raw number — TypeScript expects an options object.
     const { data, error } = await supabaseAdmin
       .storage
       .from(bucket)
-      .createSignedUploadUrl(path, expiresIn);
+      .createSignedUploadUrl(key, { expiresIn });
 
     if (error) {
-      console.error('Storage error:', error);
-      return NextResponse.json({ error: 'Failed to create upload URL' }, { status: 500 });
+      console.error('Storage error (createSignedUploadUrl):', error);
+      return NextResponse.json({ error: 'Failed to create signed upload URL' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      uploadUrl: data.signedUrl,
-      key: path,
-      bucket
-    });
-  } catch (e) {
-    console.error('API error:', e);
+    // different versions / builds of supabase client may return fields with slightly different names
+    const uploadUrl =
+      (data && (data.signedURL ?? data.signedUrl ?? (data as any).signed_url ?? (data as any).upload_url)) ||
+      null;
+
+    if (!uploadUrl) {
+      console.error('Storage: createSignedUploadUrl returned unexpected payload', data);
+      return NextResponse.json({ error: 'Failed to get upload URL' }, { status: 500 });
+    }
+
+    // Return URL for client to PUT to and the key (so you can store reference in complaints table)
+    return NextResponse.json({ uploadUrl, key }, { status: 201 });
+  } catch (err: any) {
+    console.error('[API] /api/attachments error', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
