@@ -2,23 +2,31 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
+    throw new Error(
+      'Supabase credentials are missing. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in your environment variables.'
+    );
+  }
+
+  return createClient(supabaseUrl, supabaseServiceRoleKey);
+}
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = getSupabaseClient(); // ✅ only created when endpoint runs
+
     const body = await req.json();
     const { complaint_id } = body;
+
     if (!complaint_id) {
       return NextResponse.json({ error: 'complaint_id required' }, { status: 400 });
     }
 
-    // generate a job id (uuid) and store a submission attempt inside complaint.submitted_to_portal
     const jobId = randomUUID();
-
-    // update the complaint to mark queued/submitted (optimistic)
     const updatePayload = {
       status: 'queued_for_portal',
       submitted_to_portal: {
@@ -37,12 +45,9 @@ export async function POST(req: NextRequest) {
 
     if (updateErr) {
       console.error('Supabase update error', updateErr);
-      // still return job id but set status accordingly
       return NextResponse.json({ job_id: jobId, warning: 'Failed to update DB' }, { status: 202 });
     }
 
-    // In a real worker you'd enqueue a job here (BullMQ / Upstash / Worker)
-    // For pilot, we simply return job id and updated complaint
     return NextResponse.json({ job_id: jobId, updatedComplaint }, { status: 200 });
 
   } catch (err: any) {
