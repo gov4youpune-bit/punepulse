@@ -1,5 +1,6 @@
 import './globals.css';
-import type { Metadata, Viewport } from 'next';
+import type { Metadata } from 'next';
+import type { Viewport } from 'next/types'; // ✅ correct import for latest Next.js
 import { Inter } from 'next/font/google';
 import { PWAProvider } from '@/providers/pwa-provider';
 import { ToastProvider } from '@/providers/toast-provider';
