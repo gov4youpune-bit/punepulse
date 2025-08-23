@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ArrowLeft, Send, Loader2, CheckCircle, Copy, Share2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -56,6 +57,7 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
   
   const { images, location } = useComplaintStore();
   const { toast } = useToast();
+  const router = useRouter();
 
   const selectedCategory = categories.find(cat => cat.value === category);
 
@@ -137,6 +139,9 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
         title: "Complaint Submitted!",
         description: `Your tracking token is ${result.token}`,
       });
+
+      // Redirect to the shareable track page immediately
+      router.push(`/track/${encodeURIComponent(result.token)}`);
 
     } catch (error) {
       console.error('Submission error:', error);

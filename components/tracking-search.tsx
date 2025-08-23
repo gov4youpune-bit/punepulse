@@ -1,12 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Search, ArrowLeft, MapPin, Calendar, FileText, ExternalLink } from 'lucide-react';
+import { Search, ArrowLeft, MapPin, Calendar, FileText, ExternalLink, Copy, Share2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { useToast } from '@/hooks/use-toast';
 
 interface TrackingSearchProps {
   onBack: () => void;
@@ -22,6 +24,7 @@ interface ComplaintStatus {
   location_text: string;
   created_at: string;
   updated_at: string;
+  attachments?: string[];
   submitted_to_portal?: {
     portal_token?: string;
     portal_url?: string;
@@ -39,28 +42,31 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
   const [complaint, setComplaint] = useState<ComplaintStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const { toast } = useToast();
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!searchToken.trim()) return;
-    
+    const token = searchToken.trim();
+    if (!token) return;
+
     setLoading(true);
     setError(null);
     setComplaint(null);
 
     try {
-      // Updated path to match new API route
-      const response = await fetch(`/api/complaints/by-token/${searchToken.trim()}`);
-      
-      if (!response.ok) {
-        if (response.status === 404) {
+      const res = await fetch(`/api/complaints/by-token/${encodeURIComponent(token)}`);
+      if (!res.ok) {
+        if (res.status === 404) {
           throw new Error('Complaint not found. Please check your tracking token.');
         }
-        throw new Error('Failed to fetch complaint details');
+        const txt = await res.text().catch(() => res.statusText);
+        throw new Error(`Failed to fetch complaint details (${res.status}): ${txt}`);
       }
-
-      const data = await response.json();
+      const data = (await res.json()) as ComplaintStatus;
+      if (!data || !data.id) {
+        throw new Error('Invalid data from server');
+      }
       setComplaint(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -69,24 +75,66 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
     }
   };
 
+  const openFullPage = (token?: string) => {
+    const t = token ?? complaint?.token;
+    if (!t) return;
+    router.push(`/track/${encodeURIComponent(t)}`);
+  };
+
+  const copyToken = async () => {
+    if (!complaint?.token) return;
+    try {
+      await navigator.clipboard.writeText(complaint.token);
+      toast({ title: 'Token copied', description: complaint.token });
+    } catch {
+      toast({ title: 'Copy failed', description: 'Could not copy token to clipboard', variant: 'destructive' });
+    }
+  };
+
+  const shareToken = async () => {
+    if (!complaint?.token) return;
+    const url = `${window.location.origin}/track/${encodeURIComponent(complaint.token)}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Pune Pulse complaint', text: `Track complaint ${complaint.token}`, url });
+      } catch {
+        // fallback: copy
+        await navigator.clipboard.writeText(url);
+        toast({ title: 'Link copied', description: url });
+      }
+    } else {
+      await navigator.clipboard.writeText(url);
+      toast({ title: 'Link copied', description: url });
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
-      case 'submitted': return 'bg-blue-100 text-blue-800';
-      case 'in_progress': return 'bg-yellow-100 text-yellow-800';
-      case 'resolved': return 'bg-green-100 text-green-800';
-      case 'rejected': return 'bg-red-100 text-red-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'submitted':
+        return 'bg-blue-100 text-blue-800';
+      case 'in_progress':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'resolved':
+        return 'bg-green-100 text-green-800';
+      case 'rejected':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
     }
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('en-IN', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    try {
+      return new Date(dateString).toLocaleString('en-IN', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateString;
+    }
   };
 
   return (
@@ -94,12 +142,32 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
       {/* Header */}
       <div className="bg-white shadow-sm border-b p-4">
         <div className="flex items-center justify-between">
-          <Button variant="ghost" size="sm" onClick={onBack}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-          <h1 className="font-semibold">Track Complaint</h1>
-          <div></div>
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={onBack}>
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+            <h1 className="font-semibold">Track Complaint</h1>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            {complaint && (
+              <>
+                <Button size="sm" variant="ghost" onClick={() => openFullPage()}>
+                  <ExternalLink className="w-4 h-4 mr-2" />
+                  Open full page
+                </Button>
+                <Button size="sm" variant="ghost" onClick={copyToken}>
+                  <Copy className="w-4 h-4 mr-2" />
+                  Copy token
+                </Button>
+                <Button size="sm" onClick={shareToken}>
+                  <Share2 className="w-4 h-4 mr-2" />
+                  Share
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -119,6 +187,7 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
                     value={searchToken}
                     onChange={(e) => setSearchToken(e.target.value.toUpperCase())}
                     className="font-mono"
+                    aria-label="Tracking token"
                   />
                   <Button type="submit" disabled={loading || !searchToken.trim()}>
                     <Search className="w-4 h-4" />
@@ -132,14 +201,14 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
           </form>
         </Card>
 
-        {/* Error State */}
+        {/* Error */}
         {error && (
           <Card className="p-6 mb-6 border-red-200 bg-red-50">
             <p className="text-red-700">{error}</p>
           </Card>
         )}
 
-        {/* Loading State */}
+        {/* Loading */}
         {loading && (
           <Card className="p-6 mb-6">
             <div className="text-center py-8">
@@ -152,17 +221,23 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
         {/* Complaint Details */}
         {complaint && (
           <div className="space-y-6">
-            {/* Status Card */}
             <Card className="p-6">
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <h2 className="text-xl font-semibold mb-2">
-                    Complaint {complaint.token}
-                  </h2>
+                  <button
+                    onClick={() => openFullPage()}
+                    className="text-left"
+                    aria-label="Open full complaint page"
+                  >
+                    <h2 className="text-xl font-semibold mb-2">
+                      Complaint <span className="font-mono">{complaint.token}</span>
+                    </h2>
+                  </button>
                   <Badge className={getStatusColor(complaint.status)}>
                     {complaint.status.replace('_', ' ').toUpperCase()}
                   </Badge>
                 </div>
+
                 <div className="text-right text-sm text-gray-500">
                   <div>Submitted: {formatDate(complaint.created_at)}</div>
                   <div>Updated: {formatDate(complaint.updated_at)}</div>
@@ -172,7 +247,9 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
                   <h3 className="font-medium text-sm text-gray-500 mb-1">Category</h3>
-                  <p className="capitalize">{complaint.category} - {complaint.subtype}</p>
+                  <p className="capitalize">
+                    {complaint.category} {complaint.subtype ? `— ${complaint.subtype}` : ''}
+                  </p>
                 </div>
                 {complaint.location_text && (
                   <div>
@@ -189,7 +266,7 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
 
               <div>
                 <h3 className="font-medium text-sm text-gray-500 mb-2">Description</h3>
-                <p className="text-gray-700">{complaint.description}</p>
+                <p className="text-gray-700 whitespace-pre-wrap">{complaint.description}</p>
               </div>
             </Card>
 
@@ -200,7 +277,7 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
                   <ExternalLink className="w-4 h-4 mr-2" />
                   Portal Submission
                 </h3>
-                
+
                 <div className="space-y-3">
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-600">Portal Token:</span>
@@ -208,7 +285,7 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
                       {complaint.submitted_to_portal.portal_token}
                     </span>
                   </div>
-                  
+
                   {complaint.submitted_to_portal.submitted_at && (
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-gray-600">Submitted:</span>
@@ -217,19 +294,21 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
                       </span>
                     </div>
                   )}
-                  
+
                   {complaint.submitted_to_portal.portal_url && (
                     <div className="pt-2">
-                      <Button variant="outline" size="sm" asChild>
-                        <a 
-                          href={complaint.submitted_to_portal.portal_url} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                        >
-                          <ExternalLink className="w-4 h-4 mr-2" />
-                          View on PMC Portal
-                        </a>
-                      </Button>
+                      <a
+                        href={complaint.submitted_to_portal.portal_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Button variant="outline" size="sm" asChild>
+                          <span className="flex items-center">
+                            <ExternalLink className="w-4 h-4 mr-2" />
+                            View on PMC Portal
+                          </span>
+                        </Button>
+                      </a>
                     </div>
                   )}
                 </div>
@@ -243,18 +322,14 @@ export function TrackingSearch({ onBack }: TrackingSearchProps) {
                   <Calendar className="w-4 h-4 mr-2" />
                   Activity Timeline
                 </h3>
-                
+
                 <div className="space-y-3">
                   {complaint.audit_logs.map((log, index) => (
                     <div key={index} className="flex items-start space-x-3 pb-3 border-b border-gray-100 last:border-b-0">
                       <div className="w-2 h-2 bg-blue-400 rounded-full mt-2 flex-shrink-0"></div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium capitalize">
-                          {log.action.replace('_', ' ')}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {formatDate(log.created_at)}
-                        </p>
+                        <p className="text-sm font-medium capitalize">{log.action.replace('_', ' ')}</p>
+                        <p className="text-xs text-gray-500">{formatDate(log.created_at)}</p>
                         {log.payload && Object.keys(log.payload).length > 0 && (
                           <pre className="text-xs text-gray-600 mt-1 bg-gray-50 p-2 rounded overflow-x-auto">
                             {JSON.stringify(log.payload, null, 2)}

@@ -70,7 +70,7 @@ export function AdminAuth() {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@punepulse.dev"
+                  placeholder="akshay@punepulse.dev"
                   required
                 />
               </div>
