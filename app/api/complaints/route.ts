@@ -4,6 +4,7 @@ export const revalidate = 0;
 // app/api/complaints/route.ts
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { sendComplaintNotification } from '@/lib/email';
 
 export async function POST(request: Request) {
   try {
@@ -62,6 +63,16 @@ export async function POST(request: Request) {
       }
     });
 
+    // Send email notification (fire and forget)
+    if (email) {
+      sendComplaintNotification({
+        type: 'complaint_created',
+        complaint: data
+      }).catch(error => {
+        console.error('[EMAIL] Failed to send complaint created notification:', error);
+      });
+    }
+
     return NextResponse.json({ id: data.id, token: data.token, status: data.status }, { status: 201 });
   } catch (err: any) {
     console.error('[API] /api/complaints error', err);
@@ -93,7 +104,27 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Failed to fetch complaints' }, { status: 500 });
     }
 
-    return NextResponse.json({ complaints: data });
+    // Parse location coordinates for each complaint
+    const complaintsWithCoords = data.map((complaint: any) => {
+      let lat: number | null = null;
+      let lng: number | null = null;
+
+      if (complaint.location_text && typeof complaint.location_text === 'string') {
+        const coords = complaint.location_text.trim().match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
+        if (coords) {
+          lat = parseFloat(coords[1]);
+          lng = parseFloat(coords[2]);
+        }
+      }
+
+      return {
+        ...complaint,
+        lat,
+        lng
+      };
+    });
+
+    return NextResponse.json({ complaints: complaintsWithCoords });
   } catch (err: any) {
     console.error('[API] /api/complaints GET error', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

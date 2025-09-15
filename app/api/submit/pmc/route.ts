@@ -5,6 +5,7 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
+import { sendComplaintNotification } from '@/lib/email';
 
 function getSupabaseClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -50,6 +51,20 @@ export async function POST(req: NextRequest) {
     if (updateErr) {
       console.error('Supabase update error', updateErr);
       return NextResponse.json({ job_id: jobId, warning: 'Failed to update DB' }, { status: 202 });
+    }
+
+    // Send email notification if complaint has email
+    if (updatedComplaint.email) {
+      sendComplaintNotification({
+        type: 'complaint_submitted_to_portal',
+        complaint: updatedComplaint,
+        extra: {
+          portal_token: jobId,
+          portal_url: 'https://portal.pmc.gov.in' // Update with actual portal URL
+        }
+      }).catch(error => {
+        console.error('[EMAIL] Failed to send portal submission notification:', error);
+      });
     }
 
     return NextResponse.json({ job_id: jobId, updatedComplaint }, { status: 200 });

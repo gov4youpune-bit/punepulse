@@ -3,8 +3,8 @@ export const dynamic = "force-dynamic";
 
 import { createClient } from '@supabase/supabase-js';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Shield, Users, FileText, MapPin, Calendar, Download, Search, ArrowLeft, ExternalLink, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Shield, Users, FileText, MapPin, Calendar, Download, Search, ArrowLeft, ExternalLink, Trash2, Loader2 } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ import { useAuthStore } from '@/store/auth-store';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 
 // Types
 interface DashboardStats {
@@ -24,6 +25,63 @@ interface DashboardStats {
   pending_complaints: number;
   resolved_complaints: number;
   today_complaints: number;
+}
+
+// Attachment viewer component
+function AttachmentViewer({ attachmentKey, index }: { attachmentKey: string; index: number }) {
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchSignedUrl = async () => {
+      try {
+        const res = await fetch(`/api/attachments/public?key=${encodeURIComponent(attachmentKey)}`);
+        if (!res.ok) throw new Error('Failed to get signed URL');
+        const data = await res.json();
+        setSignedUrl(data.url);
+      } catch (err) {
+        console.error('Failed to get signed URL:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load attachment');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSignedUrl();
+  }, [attachmentKey]);
+
+  if (loading) {
+    return (
+      <div className="aspect-square bg-gray-100 rounded-lg flex items-center justify-center">
+        <div className="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="aspect-square bg-red-50 rounded-lg flex items-center justify-center p-2">
+        <div className="text-center text-red-600 text-xs">
+          <div>Error loading</div>
+          <div>Attachment {index + 1}</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden border">
+      {signedUrl && (
+        <img
+          src={signedUrl}
+          alt={`Attachment ${index + 1}`}
+          className="w-full h-full object-cover cursor-pointer hover:opacity-90 transition-opacity"
+          onClick={() => window.open(signedUrl, '_blank')}
+        />
+      )}
+    </div>
+  );
 }
 
 interface Complaint {
@@ -41,6 +99,33 @@ interface Complaint {
   attachments?: string[];
   submitted_to_portal?: any;
   audit_logs?: any[];
+  // Worker assignment fields
+  assigned_to?: string | null;
+  assigned_at?: string | null;
+  verification_status?: 'none' | 'pending' | 'verified' | 'rejected';
+  verified_at?: string | null;
+  verified_by?: string | null;
+  // Assignment history and worker reports
+  complaint_assignments?: Array<{
+    id: string;
+    created_at: string;
+    note?: string;
+    workers?: {
+      name: string;
+      email: string;
+    };
+  }>;
+  worker_reports?: Array<{
+    id: string;
+    comments?: string;
+    photos: string[];
+    status: string;
+    created_at: string;
+    workers?: {
+      name: string;
+      email: string;
+    };
+  }>;
   // local UI fields
   _selected?: boolean;
   _group?: string | null;
@@ -63,6 +148,16 @@ export default function AdminDashboard() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loadingComplaints, setLoadingComplaints] = useState(false);
+  
+  // assignment state
+  const [workers, setWorkers] = useState<any[]>([]);
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [selectedComplaintForAssign, setSelectedComplaintForAssign] = useState<Complaint | null>(null);
+  const [selectedWorkerId, setSelectedWorkerId] = useState('');
+  const [assignmentNote, setAssignmentNote] = useState('');
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [submittingToPortal, setSubmittingToPortal] = useState<string | null>(null);
 
   // bulk selection
   const [selectAll, setSelectAll] = useState(false);
@@ -175,17 +270,7 @@ export default function AdminDashboard() {
       if (!res.ok) throw new Error('Failed to load complaints');
       const json = await res.json();
       const list: Complaint[] = (json.complaints || []).map((c: any) => {
-        // attempt to extract lat/lng from location_text if available (format: "lat,lng" or "lat, lng")
-        let lat: number | null = null;
-        let lng: number | null = null;
-        if (c.location_text && typeof c.location_text === 'string') {
-          const maybe = c.location_text.trim().match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
-          if (maybe) {
-            lat = parseFloat(maybe[1]);
-            lng = parseFloat(maybe[2]);
-          }
-        }
-        return { ...c, _selected: false, _group: null, lat, lng };
+        return { ...c, _selected: false, _group: null };
       });
       setComplaints(list);
       setFilteredComplaints(list);
@@ -214,16 +299,30 @@ export default function AdminDashboard() {
     }
   };
 
-  // init: if user present, fetch complaints
+  // fetch workers
+  const fetchWorkers = async () => {
+    try {
+      const res = await fetch('/api/workers');
+      if (!res.ok) throw new Error('Failed to load workers');
+      const data = await res.json();
+      setWorkers(data.workers || []);
+    } catch (err) {
+      console.error('Load workers error', err);
+      toast({ title: 'Error', description: 'Unable to load workers', variant: 'destructive' });
+    }
+  };
+
+  // init: if user present, fetch complaints and workers
   useEffect(() => {
     if (user) {
       fetchComplaints();
+      fetchWorkers();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   // view details by token (opens modal)
-  const openDetails = async (token: string) => {
+  const openDetails = useCallback(async (token: string) => {
     setDetailsOpen(true);
     setSelectedComplaint(null);
     setDetailsLoading(true);
@@ -246,10 +345,11 @@ export default function AdminDashboard() {
     } finally {
       setDetailsLoading(false);
     }
-  };
+  }, [toast]);
 
   // submit to portal
   const submitToPortal = async (complaintId: string) => {
+    setSubmittingToPortal(complaintId);
     try {
       const res = await fetch(`/api/submit/pmc`, {
         method: 'POST',
@@ -267,6 +367,8 @@ export default function AdminDashboard() {
     } catch (err) {
       console.error('Submit portal error', err);
       toast({ title: 'Submit Failed', description: (err as Error).message || 'Try again', variant: 'destructive' });
+    } finally {
+      setSubmittingToPortal(null);
     }
   };
 
@@ -276,6 +378,18 @@ export default function AdminDashboard() {
     setUser(null);
     toast({ title: 'Signed out' });
   };
+
+  // Handle tab changes for map
+  useEffect(() => {
+    if (activeTab === 'city-map' && mapRef.current) {
+      // Invalidate size when switching to map tab
+      setTimeout(() => {
+        if (mapRef.current) {
+          mapRef.current.invalidateSize();
+        }
+      }, 100);
+    }
+  }, [activeTab]);
 
   // Map: lazy-load Leaflet (CDN) and render markers
   useEffect(() => {
@@ -313,6 +427,13 @@ export default function AdminDashboard() {
           }).addTo(mapRef.current);
         }
 
+        // Invalidate size to ensure proper rendering
+        setTimeout(() => {
+          if (mapRef.current) {
+            mapRef.current.invalidateSize();
+          }
+        }, 200);
+
         // clear previous markers
         markersRef.current.forEach((m) => m.remove());
         markersRef.current = [];
@@ -321,21 +442,56 @@ export default function AdminDashboard() {
         const coords = complaints.filter(c => typeof c.lat === 'number' && typeof c.lng === 'number');
         coords.forEach((c) => {
           const marker = L.marker([c.lat as number, c.lng as number]).addTo(mapRef.current);
-          marker.bindPopup(`<div style="max-width:220px"><strong>${c.token}</strong><br/>${(c.category || '')} - ${(c.subtype || '')}<br/><button id="open-${c.token}" style="margin-top:6px;padding:6px 8px;border-radius:4px;background:#2563eb;color:white;border:none;cursor:pointer;">View Details</button></div>`);
-          marker.on('popupopen', () => {
-            // attach click handler to the popup button
-            setTimeout(() => {
-              const btn = document.getElementById(`open-${c.token}`);
-              btn?.addEventListener('click', () => openDetails(c.token));
-            }, 50);
+          
+          // Create popup content with better styling
+          const popupContent = `
+            <div style="max-width:260px; padding:8px;">
+              <div style="font-weight:bold; color:#1f2937; margin-bottom:4px;">${c.token}</div>
+              <div style="color:#6b7280; font-size:12px; margin-bottom:6px;">
+                ${(c.category || '')} - ${(c.subtype || '')}
+              </div>
+              <button 
+                id="open-${c.token}" 
+                style="
+                  width:100%; 
+                  padding:6px 12px; 
+                  border-radius:6px; 
+                  background:#2563eb; 
+                  color:white; 
+                  border:none; 
+                  cursor:pointer; 
+                  font-size:12px;
+                  font-weight:500;
+                "
+                onmouseover="this.style.background='#1d4ed8'"
+                onmouseout="this.style.background='#2563eb'"
+              >
+                View Details
+              </button>
+            </div>
+          `;
+          
+          marker.bindPopup(popupContent, { 
+            autoPan: true, 
+            maxWidth: 260,
+            className: 'custom-popup'
           });
+          
+          // Use marker click instead of popup button to open details modal
+          marker.on('click', () => {
+            openDetails(c.token);
+          });
+          
           markersRef.current.push(marker);
         });
 
-        // if there are markers fit bounds
+        // if there are markers fit bounds, otherwise center on Pune
         if (markersRef.current.length > 0) {
           const group = L.featureGroup(markersRef.current);
           mapRef.current.fitBounds(group.getBounds().pad(0.2));
+        } else {
+          // Fallback to Pune center if no markers
+          mapRef.current.setView([18.5204, 73.8567], 12);
         }
       } catch (err) {
         console.error('Map load error', err);
@@ -345,7 +501,7 @@ export default function AdminDashboard() {
 
     loadLeaflet();
     // rebuild when complaints change
-  }, [activeTab, complaints, toast]);
+  }, [activeTab, complaints, toast, openDetails]);
 
   // derived small helpers
   const displayEmail = useMemo(() => user?.email || '—', [user]);
@@ -369,25 +525,23 @@ export default function AdminDashboard() {
 
     // confirmation for delete
     if (action === 'delete') {
-      const confirmDelete = confirm(`Delete ${selected.length} complaint(s)? This cannot be undone (unless server prevents it).`);
+      const confirmDelete = confirm(`Delete ${selected.length} complaint(s)? This cannot be undone.`);
       if (!confirmDelete) return;
+      setIsBulkDeleting(true);
     }
 
     // optimistic local update
     if (action === 'set_urgency') {
       const newUrgency = payload?.urgency;
       setComplaints(prev => prev.map(c => c._selected ? { ...c, urgency: newUrgency } : c));
-      toast({ title: 'Priority updated', description: `Set ${selected.length} complaint(s) to ${newUrgency}` });
     } else if (action === 'group') {
       const groupName = payload?.group;
-      setComplaints(prev => prev.map(c => c._selected ? { ...c, _group: groupName } : c));
-      toast({ title: 'Grouped', description: `Grouped ${selected.length} complaint(s) into "${payload?.group}"` });
+      setComplaints(prev => prev.map(c => c._selected ? { ...c, group_name: groupName } : c));
     } else if (action === 'delete') {
       setComplaints(prev => prev.filter(c => !c._selected));
-      toast({ title: 'Deleted', description: `Deleted ${selected.length} complaint(s) (optimistic)` });
     }
 
-    // call backend (if endpoint exists) to perform action
+    // call backend to perform action
     try {
       const res = await fetch('/api/complaints/bulk', {
         method: 'POST',
@@ -399,21 +553,43 @@ export default function AdminDashboard() {
         })
       });
       if (!res.ok) {
-        // server does not support bulk endpoint -> show info
-        const txt = await res.text().catch(() => res.statusText);
-        throw new Error(txt || 'Server bulk action failed');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Bulk action failed');
       }
       const json = await res.json();
-      toast({ title: 'Bulk action complete', description: json?.message || 'Server confirmed action' });
-      // refresh list from server to ensure canonical state
+      
+      if (json.success) {
+        toast({ title: 'Bulk action complete', description: json.message || 'Action completed successfully' });
+        // Refresh from server to ensure canonical state
       fetchComplaints();
+      } else {
+        toast({ 
+          title: 'Bulk action partial success', 
+          description: json.message || 'Some operations failed',
+          variant: 'warning'
+        });
+        // Refresh to sync with server state
+        fetchComplaints();
+      }
     } catch (err) {
-      console.warn('Bulk endpoint error (may not exist)', err);
-      toast({ title: 'Bulk action (local)', description: 'Action applied locally. Implement /api/complaints/bulk to persist changes.', variant: 'warning' });
+      console.error('Bulk action failed', err);
+      toast({ 
+        title: 'Bulk action failed', 
+        description: err instanceof Error ? err.message : 'Failed to perform bulk action', 
+        variant: 'destructive' 
+      });
+      // Revert optimistic update
+      fetchComplaints();
+    } finally {
+      if (action === 'delete') {
+        setIsBulkDeleting(false);
+      }
     }
   };
 
   // bulk delete helper to call explicit endpoint if available
+
+  
   const bulkDelete = () => performBulkAction('delete');
 
   // change selected priority (urgency)
@@ -426,7 +602,7 @@ export default function AdminDashboard() {
     performBulkAction('group', { group: name });
   };
 
-  // ---- Single-item update (attempts to call an update API) ----
+  // ---- Single-item update (calls the update API) ----
   const updateComplaintField = async (id: string, patch: Record<string, any>) => {
     // optimistic update locally
     setComplaints(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
@@ -437,14 +613,129 @@ export default function AdminDashboard() {
         body: JSON.stringify({ id, patch })
       });
       if (!res.ok) {
-        const txt = await res.text().catch(() => res.statusText);
-        throw new Error(txt || 'Update failed');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Update failed');
       }
-      toast({ title: 'Updated', description: 'Complaint updated on server' });
-      fetchComplaints();
+      const data = await res.json();
+      // Update with server response
+      setComplaints(prev => prev.map(c => c.id === id ? { ...c, ...data.complaint } : c));
+      toast({ title: 'Updated', description: 'Complaint updated successfully' });
     } catch (err) {
-      console.warn('Update endpoint missing or failed', err);
-      toast({ title: 'Updated locally', description: 'Server update not available. Implement /api/complaints/update to persist changes.', variant: 'warning' });
+      console.error('Update failed', err);
+      toast({ 
+        title: 'Update Failed', 
+        description: err instanceof Error ? err.message : 'Failed to update complaint', 
+        variant: 'destructive' 
+      });
+      // Revert optimistic update
+      fetchComplaints();
+    }
+  };
+
+  // ---- Assignment functions ----
+  const openAssignDialog = (complaint: Complaint) => {
+    setSelectedComplaintForAssign(complaint);
+    setSelectedWorkerId('');
+    setAssignmentNote('');
+    setAssignDialogOpen(true);
+  };
+
+  const handleAssign = async () => {
+    if (!selectedComplaintForAssign || !selectedWorkerId) return;
+
+    setIsAssigning(true);
+    try {
+      const res = await fetch('/api/complaints/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          complaint_id: selectedComplaintForAssign.id,
+          assigned_to_user_id: selectedWorkerId,
+          note: assignmentNote.trim() || null
+        })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Assignment failed');
+      }
+
+      const data = await res.json();
+      
+      // Update complaint in state
+      setComplaints(prev => prev.map(c => 
+        c.id === selectedComplaintForAssign.id 
+          ? { ...c, ...data.complaint }
+          : c
+      ));
+
+      toast({ 
+        title: 'Assigned', 
+        description: `Complaint assigned successfully` 
+      });
+
+      setAssignDialogOpen(false);
+      setSelectedComplaintForAssign(null);
+    } catch (err) {
+      console.error('Assignment failed', err);
+      toast({ 
+        title: 'Assignment Failed', 
+        description: err instanceof Error ? err.message : 'Failed to assign complaint', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  // ---- Verification functions ----
+  const handleVerify = async (complaintId: string, reportId?: string, action: 'verify' | 'reject' = 'verify') => {
+    try {
+      const res = await fetch('/api/complaints/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          complaint_id: complaintId,
+          report_id: reportId,
+          action
+        })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Verification failed');
+      }
+
+      const data = await res.json();
+      
+      // Update complaint in state
+      setComplaints(prev => prev.map(c => 
+        c.id === complaintId 
+          ? { ...c, ...data.complaint }
+          : c
+      ));
+
+      // Update selected complaint if it's the same
+      if (selectedComplaint?.id === complaintId) {
+        setSelectedComplaint({ ...selectedComplaint, ...data.complaint });
+      }
+
+      toast({ 
+        title: action === 'verify' ? 'Verified' : 'Rejected', 
+        description: `Complaint ${action === 'verify' ? 'verified' : 'rejected'} successfully` 
+      });
+
+      // Refresh details if modal is open
+      if (selectedComplaint?.id === complaintId) {
+        openDetails(selectedComplaint.token);
+      }
+    } catch (err) {
+      console.error('Verification failed', err);
+      toast({ 
+        title: 'Verification Failed', 
+        description: err instanceof Error ? err.message : 'Failed to verify complaint', 
+        variant: 'destructive' 
+      });
     }
   };
 
@@ -464,6 +755,20 @@ export default function AdminDashboard() {
   // Main admin UI
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Leaflet CSS fixes */}
+      <style jsx global>{`
+        .leaflet-container .leaflet-popup {
+          z-index: 99999 !important;
+        }
+        .leaflet-container .leaflet-popup-pane {
+          z-index: 99999 !important;
+        }
+        .custom-popup .leaflet-popup-content-wrapper {
+          border-radius: 8px;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+      `}</style>
+      
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
@@ -616,7 +921,19 @@ export default function AdminDashboard() {
                   </Select>
 
                   <Button variant="outline" onClick={groupSelected}>Group Selected</Button>
-                  <Button variant="destructive" onClick={bulkDelete}><Trash2 className="w-4 h-4 mr-2" />Delete Selected</Button>
+                  <Button variant="destructive" onClick={bulkDelete} disabled={isBulkDeleting}>
+                    {isBulkDeleting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete Selected
+                      </>
+                    )}
+                  </Button>
                 </div>
               </div>
             </Card>
@@ -671,7 +988,21 @@ export default function AdminDashboard() {
 
                     <div className="flex flex-col gap-2">
                       <Button variant="outline" size="sm" onClick={() => openDetails(c.token)}>View Details</Button>
-                      <Button size="sm" onClick={() => submitToPortal(c.id)}>Submit to Portal</Button>
+                      <Button variant="outline" size="sm" onClick={() => openAssignDialog(c)}>Assign</Button>
+                      <Button 
+                        size="sm" 
+                        onClick={() => submitToPortal(c.id)}
+                        disabled={submittingToPortal === c.id}
+                      >
+                        {submittingToPortal === c.id ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Submitting...
+                          </>
+                        ) : (
+                          'Submit to Portal'
+                        )}
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -799,17 +1130,86 @@ export default function AdminDashboard() {
                   {Array.isArray(selectedComplaint.attachments) && selectedComplaint.attachments.length > 0 && (
                     <div>
                       <h5 className="font-medium text-sm text-gray-600 mb-1">Attachments</h5>
-                      <div className="flex gap-2 flex-wrap">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                         {selectedComplaint.attachments.map((a: string, idx: number) => (
-                          <a
-                            key={idx}
-                            href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${process.env.NEXT_PUBLIC_STORAGE_BUCKET}/${encodeURIComponent(a)}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-sm text-blue-600 underline"
-                          >
-                            View Attachment {idx + 1}
-                          </a>
+                          <AttachmentViewer key={idx} attachmentKey={a} index={idx} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Assignment History */}
+                  {selectedComplaint.complaint_assignments && selectedComplaint.complaint_assignments.length > 0 && (
+                    <div>
+                      <h5 className="font-medium text-sm text-gray-600 mb-1">Assignment History</h5>
+                      <div className="space-y-2">
+                        {selectedComplaint.complaint_assignments.map((assignment: any, i: number) => (
+                          <div key={i} className="text-xs text-gray-600 bg-blue-50 p-3 rounded border">
+                            <div className="font-medium text-blue-900">
+                              Assigned to {assignment.workers?.name || 'Unknown Worker'}
+                            </div>
+                            <div className="text-blue-700 text-xs">
+                              {new Date(assignment.created_at).toLocaleString()}
+                            </div>
+                            {assignment.note && (
+                              <div className="text-blue-600 mt-1 italic">&ldquo;{assignment.note}&rdquo;</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Worker Reports */}
+                  {selectedComplaint.worker_reports && selectedComplaint.worker_reports.length > 0 && (
+                    <div>
+                      <h5 className="font-medium text-sm text-gray-600 mb-1">Worker Reports</h5>
+                      <div className="space-y-3">
+                        {selectedComplaint.worker_reports.map((report: any, i: number) => (
+                          <div key={i} className="text-xs text-gray-600 bg-green-50 p-3 rounded border">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="font-medium text-green-900">
+                                Report by {report.workers?.name || 'Unknown Worker'}
+                              </div>
+                              <Badge className={report.status === 'verified' ? 'bg-green-100 text-green-800' : 
+                                              report.status === 'rejected' ? 'bg-red-100 text-red-800' : 
+                                              'bg-yellow-100 text-yellow-800'}>
+                                {report.status}
+                              </Badge>
+                            </div>
+                            <div className="text-green-700 text-xs mb-2">
+                              {new Date(report.created_at).toLocaleString()}
+                            </div>
+                            {report.comments && (
+                              <div className="text-green-600 mb-2 italic">&ldquo;{report.comments}&rdquo;</div>
+                            )}
+                            {report.photos && report.photos.length > 0 && (
+                              <div className="grid grid-cols-2 gap-2">
+                                {report.photos.map((photoKey: string, photoIdx: number) => (
+                                  <AttachmentViewer key={photoIdx} attachmentKey={photoKey} index={photoIdx} />
+                                ))}
+                              </div>
+                            )}
+                            {selectedComplaint.verification_status === 'pending' && (
+                              <div className="flex gap-2 mt-2">
+                                <Button 
+                                  size="sm" 
+                                  onClick={() => handleVerify(selectedComplaint.id, report.id, 'verify')}
+                                  className="text-xs"
+                                >
+                                  Verify
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive"
+                                  onClick={() => handleVerify(selectedComplaint.id, report.id, 'reject')}
+                                  className="text-xs"
+                                >
+                                  Reject
+                                </Button>
+                              </div>
+                            )}
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -831,7 +1231,19 @@ export default function AdminDashboard() {
                   )}
 
                   <div className="pt-4 flex gap-2">
-                    <Button onClick={() => selectedComplaint && submitToPortal(selectedComplaint.id)}>Submit to Portal</Button>
+                    <Button 
+                      onClick={() => selectedComplaint && submitToPortal(selectedComplaint.id)}
+                      disabled={selectedComplaint && submittingToPortal === selectedComplaint.id}
+                    >
+                      {selectedComplaint && submittingToPortal === selectedComplaint.id ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Submitting...
+                        </>
+                      ) : (
+                        'Submit to Portal'
+                      )}
+                    </Button>
                     <Button variant="outline" onClick={() => { /* open edit screen - stub */ toast({ title: 'Edit', description: 'Edit flow not implemented yet' }); }}>
                       Edit
                     </Button>
@@ -842,6 +1254,70 @@ export default function AdminDashboard() {
               {!detailsLoading && !selectedComplaint && (
                 <div className="text-center text-gray-500 py-8">No details available</div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assignment Dialog */}
+      {assignDialogOpen && selectedComplaintForAssign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md bg-white rounded shadow-lg">
+            <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="text-lg font-medium">Assign Complaint</h3>
+              <Button variant="ghost" onClick={() => setAssignDialogOpen(false)}>Close</Button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <Label className="text-sm font-medium">Complaint</Label>
+                <div className="text-sm text-gray-600 mt-1">
+                  {selectedComplaintForAssign.token} - {selectedComplaintForAssign.category}
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="worker-select" className="text-sm font-medium">Assign to Worker</Label>
+                <Select value={selectedWorkerId} onValueChange={setSelectedWorkerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a worker" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workers.map(worker => (
+                      <SelectItem key={worker.id} value={worker.user_id}>
+                        {worker.name || worker.display_name} ({worker.email || 'No email'})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="assignment-note" className="text-sm font-medium">Note (Optional)</Label>
+                <Textarea
+                  id="assignment-note"
+                  placeholder="Add a note for the worker..."
+                  value={assignmentNote}
+                  onChange={(e) => setAssignmentNote(e.target.value)}
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <Button onClick={handleAssign} disabled={!selectedWorkerId || isAssigning}>
+                  {isAssigning ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Assigning...
+                    </>
+                  ) : (
+                    'Assign'
+                  )}
+                </Button>
+                <Button variant="outline" onClick={() => setAssignDialogOpen(false)} disabled={isAssigning}>
+                  Cancel
+                </Button>
+              </div>
             </div>
           </div>
         </div>

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { ArrowLeft, Send, Loader2, CheckCircle, Copy, Share2 } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { ArrowLeft, Send, Loader2, CheckCircle, Copy, Share2, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -47,6 +47,14 @@ const subtypeLabels: Record<string, string> = {
   other: 'Other Issue'
 };
 
+interface UploadProgress {
+  file: File;
+  progress: number;
+  status: 'pending' | 'uploading' | 'completed' | 'error';
+  key?: string;
+  error?: string;
+}
+
 export function ComplaintForm({ onBack }: ComplaintFormProps) {
   const [category, setCategory] = useState('');
   const [subtype, setSubtype] = useState('');
@@ -54,12 +62,140 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<{token: string; id: string} | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   
-  const { images, location } = useComplaintStore();
+  const { images, location, setImages } = useComplaintStore();
   const { toast } = useToast();
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedCategory = categories.find(cat => cat.value === category);
+
+  // Image handling functions
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    // Filter for images only
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
+    if (imageFiles.length !== files.length) {
+      toast({
+        title: "Invalid Files",
+        description: "Only image files are allowed",
+        variant: "destructive"
+      });
+    }
+
+    if (imageFiles.length > 0) {
+      setImages(imageFiles);
+      setUploadProgress(imageFiles.map(file => ({
+        file,
+        progress: 0,
+        status: 'pending' as const
+      })));
+    }
+  };
+
+  const removeImage = (index: number) => {
+    const newImages = images?.filter((_, i) => i !== index) || [];
+    setImages(newImages);
+    setUploadProgress(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const uploadImages = async (): Promise<string[]> => {
+    if (!images || images.length === 0) return [];
+
+    setIsUploading(true);
+    const attachmentKeys: string[] = [];
+
+    try {
+      // Use batch upload if multiple files
+      if (images.length > 1) {
+        const uploadResponse = await fetch('/api/attachments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            files: images.map(img => ({
+              filename: img.name,
+              contentType: img.type
+            }))
+          })
+        });
+        
+        if (!uploadResponse.ok) throw new Error('Failed to get upload URLs');
+        
+        const { uploads } = await uploadResponse.json();
+        
+        // Upload each file
+        for (let i = 0; i < images.length; i++) {
+          const image = images[i];
+          const { uploadUrl, key } = uploads[i];
+          
+          setUploadProgress(prev => prev.map((item, idx) => 
+            idx === i ? { ...item, status: 'uploading', progress: 0 } : item
+          ));
+
+          const uploadResult = await fetch(uploadUrl, {
+            method: 'PUT',
+            body: image,
+            headers: { 'Content-Type': image.type }
+          });
+          
+          if (!uploadResult.ok) throw new Error(`Failed to upload ${image.name}`);
+          
+          attachmentKeys.push(key);
+          setUploadProgress(prev => prev.map((item, idx) => 
+            idx === i ? { ...item, status: 'completed', progress: 100, key } : item
+          ));
+        }
+      } else {
+        // Single file upload
+        const image = images[0];
+        const uploadResponse = await fetch('/api/attachments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: image.name,
+            contentType: image.type
+          })
+        });
+        
+        if (!uploadResponse.ok) throw new Error('Failed to get upload URL');
+        
+        const { uploadUrl, key } = await uploadResponse.json();
+        
+        setUploadProgress(prev => prev.map((item, idx) => 
+          idx === 0 ? { ...item, status: 'uploading', progress: 0 } : item
+        ));
+
+        const uploadResult = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: image,
+          headers: { 'Content-Type': image.type }
+        });
+        
+        if (!uploadResult.ok) throw new Error(`Failed to upload ${image.name}`);
+        
+        attachmentKeys.push(key);
+        setUploadProgress(prev => prev.map((item, idx) => 
+          idx === 0 ? { ...item, status: 'completed', progress: 100, key } : item
+        ));
+      }
+
+      return attachmentKeys;
+    } catch (error) {
+      console.error('Upload error:', error);
+      setUploadProgress(prev => prev.map(item => ({
+        ...item,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Upload failed'
+      })));
+      throw error;
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,38 +212,8 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
     setIsSubmitting(true);
 
     try {
-      // First, upload images if any
-      let attachmentKeys: string[] = [];
-      
-      if (images && images.length > 0) {
-        for (const image of images) {
-          const uploadResponse = await fetch('/api/attachments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              filename: image.name,
-              contentType: image.type
-            })
-          });
-          
-          if (!uploadResponse.ok) throw new Error('Failed to get upload URL');
-          
-          const { uploadUrl, key } = await uploadResponse.json();
-          
-          // Upload to Supabase storage
-          const uploadResult = await fetch(uploadUrl, {
-            method: 'PUT',
-            body: image,
-            headers: {
-              'Content-Type': image.type
-            }
-          });
-          
-          if (!uploadResult.ok) throw new Error('Failed to upload image');
-          
-          attachmentKeys.push(key);
-        }
-      }
+      // Upload images first
+      const attachmentKeys = await uploadImages();
 
       // Submit complaint
       const complaintData = {
@@ -304,6 +410,123 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
             </div>
           </Card>
 
+          {/* Image Upload */}
+          <Card className="p-6">
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="images">Attach Images (Optional)</Label>
+                <div className="mt-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    id="images"
+                    multiple
+                    accept="image/*"
+                    onChange={handleImageSelect}
+                    className="hidden"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full"
+                  >
+                    <Upload className="w-4 h-4 mr-2" />
+                    Select Images
+                  </Button>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Select multiple images to attach to your complaint
+                  </p>
+                </div>
+              </div>
+
+              {/* Image Previews */}
+              {images && images.length > 0 && (
+                <div className="space-y-3">
+                  <Label>Selected Images ({images.length})</Label>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {images.map((image, index) => {
+                      const progress = uploadProgress[index];
+                      return (
+                        <div key={index} className="relative group">
+                          <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden border">
+                            <img
+                              src={URL.createObjectURL(image)}
+                              alt={`Preview ${index + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                            {progress?.status === 'uploading' && (
+                              <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                <div className="text-white text-sm">
+                                  <Loader2 className="w-4 h-4 animate-spin mx-auto mb-1" />
+                                  Uploading...
+                                </div>
+                              </div>
+                            )}
+                            {progress?.status === 'completed' && (
+                              <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center">
+                                <CheckCircle className="w-6 h-6 text-green-600" />
+                              </div>
+                            )}
+                            {progress?.status === 'error' && (
+                              <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center">
+                                <X className="w-6 h-6 text-red-600" />
+                              </div>
+                            )}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="sm"
+                            className="absolute -top-2 -right-2 w-6 h-6 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={() => removeImage(index)}
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                          <div className="text-xs text-gray-500 mt-1 truncate">
+                            {image.name}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Upload Progress */}
+              {isUploading && (
+                <div className="space-y-2">
+                  <Label>Upload Progress</Label>
+                  {uploadProgress.map((item, index) => (
+                    <div key={index} className="space-y-1">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="truncate">{item.file.name}</span>
+                        <span className="text-gray-500">
+                          {item.status === 'uploading' && 'Uploading...'}
+                          {item.status === 'completed' && 'Completed'}
+                          {item.status === 'error' && 'Failed'}
+                        </span>
+                      </div>
+                      {item.status === 'uploading' && (
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div 
+                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${item.progress}%` }}
+                          />
+                        </div>
+                      )}
+                      {item.status === 'error' && (
+                        <div className="text-xs text-red-600">
+                          {item.error}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Card>
+
           {/* Contact Info */}
           <Card className="p-6">
             <div className="space-y-4">
@@ -351,9 +574,14 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
             type="submit" 
             className="w-full" 
             size="lg"
-            disabled={isSubmitting || !category || !subtype || !description.trim()}
+            disabled={isSubmitting || isUploading || !category || !subtype || !description.trim()}
           >
-            {isSubmitting ? (
+            {isUploading ? (
+              <>
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                Uploading Images...
+              </>
+            ) : isSubmitting ? (
               <>
                 <Loader2 className="w-5 h-5 mr-2 animate-spin" />
                 Submitting...

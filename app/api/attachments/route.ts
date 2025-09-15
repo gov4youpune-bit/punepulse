@@ -5,15 +5,45 @@ import { NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 
+// Types for request/response
+interface SingleFileRequest {
+  filename: string;
+  contentType: string;
+  bucket?: string;
+  filePath?: string;
+}
+
+interface BatchFileRequest {
+  files: Array<{
+    filename: string;
+    contentType: string;
+  }>;
+  bucket?: string;
+}
+
+interface SingleFileResponse {
+  uploadUrl: string;
+  key: string;
+}
+
+interface BatchFileResponse {
+  uploads: Array<{
+    uploadUrl: string;
+    key: string;
+  }>;
+}
+
 /**
  * POST /api/attachments
  *
  * Accepts either:
- *  - { filename: 'abc.jpg', contentType: 'image/jpeg' }
- *  - { bucket: 'my-bucket', filePath: 'complaints/abc.jpg' }
+ *  - Single file: { filename: 'abc.jpg', contentType: 'image/jpeg' }
+ *  - Batch files: { files: [{ filename: 'abc.jpg', contentType: 'image/jpeg' }, ...] }
+ *  - Custom path: { bucket: 'my-bucket', filePath: 'complaints/abc.jpg' }
  *
  * Returns:
- *  { uploadUrl: string, key: string }
+ *  - Single: { uploadUrl: string, key: string }
+ *  - Batch: { uploads: [{ uploadUrl: string, key: string }, ...] }
  */
 export async function POST(req: Request) {
   try {
@@ -27,17 +57,61 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Storage bucket not configured' }, { status: 500 });
     }
 
-    // Resolve filePath
-    let filePath: string | undefined = body.filePath || body.path;
-    if (!filePath && body.filename) {
-      const filename = String(body.filename).trim().replace(/\s+/g, '_');
-      filePath = `complaints/${Date.now()}-${filename}`;
+    // Check if this is a batch request
+    if (body.files && Array.isArray(body.files)) {
+      return handleBatchUpload(supabase, bucket, body as BatchFileRequest);
+    } else {
+      return handleSingleUpload(supabase, bucket, body as SingleFileRequest);
     }
-    if (!filePath) {
-      return NextResponse.json({ error: 'filePath/path or filename required' }, { status: 400 });
-    }
+  } catch (err) {
+    console.error('Unexpected error in attachments route:', err);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
 
-    // Create signed upload URL (object form works on latest clients)
+async function handleSingleUpload(supabase: any, bucket: string, body: SingleFileRequest): Promise<NextResponse> {
+  // Resolve filePath
+  let filePath: string | undefined = body.filePath;
+  if (!filePath && body.filename) {
+    const filename = String(body.filename).trim().replace(/\s+/g, '_');
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    filePath = `attachments/${dateStr}/${Date.now()}-${filename}`;
+  }
+  if (!filePath) {
+    return NextResponse.json({ error: 'filePath or filename required' }, { status: 400 });
+  }
+
+  // Create signed upload URL
+  const { data, error } = await supabase
+    .storage
+    .from(bucket)
+    .createSignedUploadUrl(filePath, { upsert: true });
+
+  if (error) {
+    console.error('Storage error (createSignedUploadUrl):', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const uploadUrl = data?.signedUrl || null;
+
+  if (!uploadUrl) {
+    console.warn('Unexpected createSignedUploadUrl response shape', data);
+    return NextResponse.json({ error: 'Unexpected storage response', data }, { status: 500 });
+  }
+
+  const response: SingleFileResponse = { uploadUrl, key: filePath };
+  return NextResponse.json(response, { status: 200 });
+}
+
+async function handleBatchUpload(supabase: any, bucket: string, body: BatchFileRequest): Promise<NextResponse> {
+  const uploads: Array<{ uploadUrl: string; key: string }> = [];
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+
+  for (const file of body.files) {
+    const filename = String(file.filename).trim().replace(/\s+/g, '_');
+    const filePath = `attachments/${dateStr}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${filename}`;
+
+    // Create signed upload URL
     const { data, error } = await supabase
       .storage
       .from(bucket)
@@ -55,9 +129,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unexpected storage response', data }, { status: 500 });
     }
 
-    return NextResponse.json({ uploadUrl, key: filePath }, { status: 200 });
-  } catch (err) {
-    console.error('Unexpected error in attachments route:', err);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    uploads.push({ uploadUrl, key: filePath });
   }
+
+  const response: BatchFileResponse = { uploads };
+  return NextResponse.json(response, { status: 200 });
 }
