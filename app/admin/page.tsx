@@ -1,19 +1,15 @@
 'use client';
 export const dynamic = "force-dynamic";
 
-import { createClient } from '@supabase/supabase-js';
-
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { Shield, Users, FileText, MapPin, Calendar, Download, Search, ArrowLeft, ExternalLink, Trash2, Loader2 } from 'lucide-react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { Shield, Users, FileText, MapPin, Calendar, Download, Search, ArrowLeft, ExternalLink, Trash2, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { useUser, SignOutButton, SignInButton } from '@clerk/nextjs';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AdminAuth } from '@/components/admin-auth';
-import { useAuthStore } from '@/store/auth-store';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
@@ -134,9 +130,8 @@ interface Complaint {
 }
 
 export default function AdminDashboard() {
-  // auth / supabase
-  const supabase = createClientComponentClient();
-  const { user, setUser, loading, setLoading } = useAuthStore();
+  // auth / clerk
+  const { user, isLoaded } = useUser();
   const { toast } = useToast();
 
   // page state
@@ -158,6 +153,10 @@ export default function AdminDashboard() {
   const [isAssigning, setIsAssigning] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [submittingToPortal, setSubmittingToPortal] = useState<string | null>(null);
+
+  // worker reports state
+  const [workerReports, setWorkerReports] = useState<any[]>([]);
+  const [loadingReports, setLoadingReports] = useState(false);
 
   // bulk selection
   const [selectAll, setSelectAll] = useState(false);
@@ -211,55 +210,21 @@ export default function AdminDashboard() {
     setFilteredComplaints(filtered);
   }, [complaints, searchTerm, statusFilter, categoryFilter]);
 
-  // watch auth state and populate user store
-  useEffect(() => {
-    let isMounted = true;
-
-    (async () => {
-      setLoading(true);
-      try {
-        const {
-          data: { user: currentUser },
-        } = await supabase.auth.getUser();
-
-        if (isMounted) {
-          if (currentUser) {
-            setUser({
-              id: currentUser.id,
-              email: (currentUser.email as string) || '',
-              role: (currentUser.user_metadata?.role as string) || 'operator',
-            });
-          } else {
-            setUser(null);
-          }
-        }
-      } catch (err) {
-        console.error('Auth fetch error', err);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    })();
-
-    // auth state listener to keep store in sync
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      const u = session?.user ?? null;
-      if (u) {
-        setUser({
-          id: u.id,
-          email: (u.email as string) || '',
-          role: (u.user_metadata?.role as string) || 'operator',
-        });
-      } else {
-        setUser(null);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-      sub.subscription?.unsubscribe?.();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // fetch worker reports
+  const fetchWorkerReports = async () => {
+    setLoadingReports(true);
+    try {
+      const res = await fetch('/api/complaints/reports');
+      if (!res.ok) throw new Error('Failed to load worker reports');
+      const data = await res.json();
+      setWorkerReports(data.reports || []);
+    } catch (err) {
+      console.error('Load worker reports error', err);
+      toast({ title: 'Error', description: 'Unable to load worker reports', variant: 'destructive' });
+    } finally {
+      setLoadingReports(false);
+    }
+  };
 
   // fetch complaints (only when authenticated)
   const fetchComplaints = async (limit = 200, offset = 0) => {
@@ -314,12 +279,13 @@ export default function AdminDashboard() {
 
   // init: if user present, fetch complaints and workers
   useEffect(() => {
-    if (user) {
+    if (isLoaded && user) {
       fetchComplaints();
       fetchWorkers();
+      fetchWorkerReports();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [isLoaded, user]);
 
   // view details by token (opens modal)
   const openDetails = useCallback(async (token: string) => {
@@ -372,12 +338,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // sign out handler
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    toast({ title: 'Signed out' });
-  };
 
   // Handle tab changes for map
   useEffect(() => {
@@ -504,7 +464,6 @@ export default function AdminDashboard() {
   }, [activeTab, complaints, toast, openDetails]);
 
   // derived small helpers
-  const displayEmail = useMemo(() => user?.email || '—', [user]);
 
   // ---- Bulk selection handlers ----
   const toggleSelectAll = (value: boolean) => {
@@ -645,12 +604,19 @@ export default function AdminDashboard() {
 
     setIsAssigning(true);
     try {
+      // Find the selected worker to get their clerk_user_id
+      const selectedWorker = workers.find(w => w.id === selectedWorkerId);
+      if (!selectedWorker) {
+        throw new Error('Selected worker not found');
+      }
+
       const res = await fetch('/api/complaints/assign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           complaint_id: selectedComplaintForAssign.id,
-          assigned_to_user_id: selectedWorkerId,
+          assigned_to_worker_id: selectedWorkerId,
+          assigned_to_clerk_id: selectedWorker.clerk_user_id,
           note: assignmentNote.trim() || null
         })
       });
@@ -671,7 +637,7 @@ export default function AdminDashboard() {
 
       toast({ 
         title: 'Assigned', 
-        description: `Complaint assigned successfully` 
+        description: `Complaint assigned to ${data.assignment.worker?.name || 'worker'} successfully` 
       });
 
       setAssignDialogOpen(false);
@@ -739,8 +705,8 @@ export default function AdminDashboard() {
     }
   };
 
-  // If still checking auth, show spinner; if not authenticated render AdminAuth
-  if (loading) {
+  // If still checking auth, show spinner; if not authenticated show message
+  if (!isLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full"></div>
@@ -749,7 +715,17 @@ export default function AdminDashboard() {
   }
 
   if (!user) {
-    return <AdminAuth />;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Admin Access Required</h1>
+          <p className="text-gray-600 mb-8">Please sign in to access the admin dashboard.</p>
+          <SignInButton mode="modal">
+            <Button>Sign In with Clerk</Button>
+          </SignInButton>
+        </div>
+      </div>
+    );
   }
 
   // Main admin UI
@@ -784,19 +760,22 @@ export default function AdminDashboard() {
 
           <div className="flex items-center space-x-4">
             <div className="text-right">
-              <p className="text-sm font-medium text-gray-900">{displayEmail}</p>
+              <p className="text-sm font-medium text-gray-900">{user.emailAddresses[0]?.emailAddress}</p>
               <p className="text-xs text-gray-500">System Administrator</p>
             </div>
-            <Button variant="outline" size="sm" onClick={handleSignOut}>Sign Out</Button>
+            <SignOutButton>
+              <Button variant="outline" size="sm">Sign Out</Button>
+            </SignOutButton>
           </div>
         </div>
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="complaints">Complaints</TabsTrigger>
+            <TabsTrigger value="worker-replies">Worker Replies</TabsTrigger>
             <TabsTrigger value="map">Map View</TabsTrigger>
             <TabsTrigger value="city-map">City Map</TabsTrigger>
             <TabsTrigger value="reports">Reports</TabsTrigger>
@@ -1014,6 +993,105 @@ export default function AdminDashboard() {
                   </div>
                 )}
               </div>
+            </Card>
+          </TabsContent>
+
+          {/* Worker Replies */}
+          <TabsContent value="worker-replies" className="space-y-6">
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium">Worker Reports</h3>
+                <Button variant="outline" onClick={fetchWorkerReports}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Refresh
+                </Button>
+              </div>
+
+              {loadingReports ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-2" />
+                  <p className="text-gray-600">Loading worker reports...</p>
+                </div>
+              ) : workerReports.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p>No worker reports pending review</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {workerReports.map((report) => (
+                    <Card key={report.id} className="p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <div className="flex items-center space-x-2 mb-1">
+                            <span className="font-mono text-sm font-medium text-blue-600">
+                              {report.complaint?.token}
+                            </span>
+                            <Badge className={getStatusColor(report.status)}>
+                              {report.status}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-gray-600">
+                            Report by {report.worker?.display_name || 'Unknown Worker'}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {new Date(report.created_at).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => handleVerify(report.complaint_id, report.id, 'verify')}
+                            className="text-xs"
+                          >
+                            <CheckCircle className="w-3 h-3 mr-1" />
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleVerify(report.complaint_id, report.id, 'reject')}
+                            className="text-xs"
+                          >
+                            <XCircle className="w-3 h-3 mr-1" />
+                            Reject
+                          </Button>
+                        </div>
+                      </div>
+
+                      {report.comments && (
+                        <div className="mb-3 p-3 bg-gray-50 rounded">
+                          <p className="text-sm text-gray-700">{report.comments}</p>
+                        </div>
+                      )}
+
+                      {report.photos && report.photos.length > 0 && (
+                        <div className="mb-3">
+                          <h5 className="text-sm font-medium text-gray-900 mb-2">
+                            Worker Photos ({report.photos.length})
+                          </h5>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            {report.photos.map((photoKey: string, index: number) => (
+                              <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
+                                <img
+                                  src={`/api/attachments/public?key=${encodeURIComponent(photoKey)}`}
+                                  alt={`Worker photo ${index + 1}`}
+                                  className="w-full h-full object-cover cursor-pointer hover:opacity-90"
+                                  onClick={() => window.open(`/api/attachments/public?key=${encodeURIComponent(photoKey)}`, '_blank')}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="text-xs text-gray-500">
+                        Complaint: {report.complaint?.category} - {report.complaint?.subtype}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
             </Card>
           </TabsContent>
 
@@ -1284,8 +1362,8 @@ export default function AdminDashboard() {
                   </SelectTrigger>
                   <SelectContent>
                     {workers.map(worker => (
-                      <SelectItem key={worker.id} value={worker.user_id}>
-                        {worker.name || worker.display_name} ({worker.email || 'No email'})
+                      <SelectItem key={worker.id} value={worker.id}>
+                        {worker.display_name} ({worker.email || 'No email'})
                       </SelectItem>
                     ))}
                   </SelectContent>

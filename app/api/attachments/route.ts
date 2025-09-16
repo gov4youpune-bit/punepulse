@@ -70,12 +70,11 @@ export async function POST(req: Request) {
 }
 
 async function handleSingleUpload(supabase: any, bucket: string, body: SingleFileRequest): Promise<NextResponse> {
-  // Resolve filePath
+  // Resolve filePath - use simple naming without date folders
   let filePath: string | undefined = body.filePath;
   if (!filePath && body.filename) {
     const filename = String(body.filename).trim().replace(/\s+/g, '_');
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    filePath = `attachments/${dateStr}/${Date.now()}-${filename}`;
+    filePath = `${Date.now()}-${filename}`;
   }
   if (!filePath) {
     return NextResponse.json({ error: 'filePath or filename required' }, { status: 400 });
@@ -105,11 +104,10 @@ async function handleSingleUpload(supabase: any, bucket: string, body: SingleFil
 
 async function handleBatchUpload(supabase: any, bucket: string, body: BatchFileRequest): Promise<NextResponse> {
   const uploads: Array<{ uploadUrl: string; key: string }> = [];
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
 
   for (const file of body.files) {
     const filename = String(file.filename).trim().replace(/\s+/g, '_');
-    const filePath = `attachments/${dateStr}/${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${filename}`;
+    const filePath = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${filename}`;
 
     // Create signed upload URL
     const { data, error } = await supabase

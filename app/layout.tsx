@@ -4,6 +4,14 @@ import { Inter } from 'next/font/google';
 import { PWAProvider } from '@/providers/pwa-provider';
 import { ToastProvider } from '@/providers/toast-provider';
 import { cn } from '@/lib/utils';
+import {
+  ClerkProvider,
+  SignInButton,
+  SignUpButton,
+  SignedIn,
+  SignedOut,
+  UserButton,
+} from '@clerk/nextjs';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -46,21 +54,32 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="Pune Pulse" />
-        <meta name="mobile-web-app-capable" content="yes" />
-        <link rel="apple-touch-startup-image" href="/apple-splash-2048-2732.png" />
-      </head>
-      <body className={cn(inter.className, "min-h-screen bg-background antialiased")}>
-        <PWAProvider>
-          <ToastProvider>
-            {children}
-          </ToastProvider>
-        </PWAProvider>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en" suppressHydrationWarning>
+        <head>
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+          <meta name="apple-mobile-web-app-title" content="Pune Pulse" />
+          <meta name="mobile-web-app-capable" content="yes" />
+          <link rel="apple-touch-startup-image" href="/apple-splash-2048-2732.png" />
+        </head>
+        <body className={cn(inter.className, "min-h-screen bg-background antialiased")}>
+          <header className="flex justify-end items-center p-4 gap-4 h-16">
+            <SignedOut>
+              <SignInButton />
+              <SignUpButton />
+            </SignedOut>
+            <SignedIn>
+              <UserButton />
+            </SignedIn>
+          </header>
+          <PWAProvider>
+            <ToastProvider>
+              {children}
+            </ToastProvider>
+          </PWAProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

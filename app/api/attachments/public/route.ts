@@ -1,15 +1,6 @@
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-/**
- * GET /api/attachments/public?key=...
- * 
- * Returns a signed URL for accessing an attachment
- * Response: { url: string }
- */
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -19,32 +10,44 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Missing key parameter' }, { status: 400 });
     }
 
-    const bucket = process.env.NEXT_PUBLIC_STORAGE_BUCKET;
-    if (!bucket) {
-      return NextResponse.json({ error: 'Storage bucket not configured' }, { status: 500 });
-    }
+    // Create signed URL for the attachment
+    // Handle both old format (with folders) and new format (direct keys)
+    let { data, error } = await supabaseAdmin.storage
+      .from('attachments')
+      .createSignedUrl(key, 3600); // 1 hour expiry
 
-    // Create signed URL (expires in 1 hour)
-    const { data, error } = await supabaseAdmin
-      .storage
-      .from(bucket)
-      .createSignedUrl(key, 3600);
+    // If the key has folder structure and fails, try without the folder prefix
+    if (error && key.includes('/')) {
+      console.log('Trying without folder prefix for key:', key);
+      const simpleKey = key.split('/').pop(); // Get just the filename
+      if (simpleKey) {
+        const retryResult = await supabaseAdmin.storage
+          .from('attachments')
+          .createSignedUrl(simpleKey, 3600);
+        
+        if (retryResult.data && !retryResult.error) {
+          data = retryResult.data;
+          error = null;
+          console.log('Successfully found attachment with simple key:', simpleKey);
+        }
+      }
+    }
 
     if (error) {
-      console.error('Storage error (createSignedUrl):', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error('Failed to create signed URL:', error);
+      if (error.message?.includes('Object not found') || error.message?.includes('404')) {
+        return NextResponse.json({ error: 'Attachment not found' }, { status: 404 });
+      }
+      return NextResponse.json({ error: 'Failed to generate access URL' }, { status: 500 });
     }
 
-    const signedUrl = data?.signedUrl || null;
-
-    if (!signedUrl) {
-      console.warn('Unexpected createSignedUrl response shape', data);
-      return NextResponse.json({ error: 'Unexpected storage response', data }, { status: 500 });
+    if (!data?.signedUrl) {
+      return NextResponse.json({ error: 'No signed URL generated' }, { status: 500 });
     }
 
-    return NextResponse.json({ url: signedUrl }, { status: 200 });
-  } catch (err) {
-    console.error('Unexpected error in attachments public route:', err);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ url: data.signedUrl });
+  } catch (err: any) {
+    console.error('[API] /api/attachments/public error', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

@@ -100,3 +100,4 @@ RETURNING id, token, status;
 -- Clean up test data
 DELETE FROM public.complaints WHERE category = 'test' AND description = 'Test complaint for schema verification';
 
+

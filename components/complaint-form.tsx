@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { ArrowLeft, Send, Loader2, CheckCircle, Copy, Share2, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useComplaintStore } from '@/store/complaint-store';
 import { useToast } from '@/hooks/use-toast';
+import { useUser } from '@clerk/nextjs';
 
 interface ComplaintFormProps {
   onBack: () => void;
@@ -69,6 +70,14 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
   const { toast } = useToast();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { user } = useUser();
+
+  // Auto-fill email when user is signed in
+  useEffect(() => {
+    if (user?.emailAddresses?.[0]?.emailAddress && !email) {
+      setEmail(user.emailAddresses[0].emailAddress);
+    }
+  }, [user, email]);
 
   const selectedCategory = categories.find(cat => cat.value === category);
 
@@ -531,16 +540,22 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
           <Card className="p-6">
             <div className="space-y-4">
               <div>
-                <Label htmlFor="email">Email (Optional)</Label>
+                <Label htmlFor="email">
+                  Email {user?.emailAddresses?.[0]?.emailAddress ? '(Auto-filled)' : '(Optional)'}
+                </Label>
                 <Input
                   id="email"
                   type="email"
                   placeholder="your.email@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  className={user?.emailAddresses?.[0]?.emailAddress ? 'bg-green-50 border-green-200' : ''}
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Provide email to receive status updates
+                  {user?.emailAddresses?.[0]?.emailAddress 
+                    ? 'Email auto-filled from your account. You can change it if needed.'
+                    : 'Provide email to receive status updates'
+                  }
                 </p>
               </div>
             </div>

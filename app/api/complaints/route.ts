@@ -33,7 +33,8 @@ export async function POST(request: Request) {
       location_text: location_text || '',
       email: email || null,
       attachments,
-      source: 'web'
+      source: 'web',
+      urgency: 'medium' // Always set default urgency
     };
 
     if (typeof lat === 'number' && typeof lng === 'number') {
@@ -120,7 +121,8 @@ export async function GET(request: Request) {
       return {
         ...complaint,
         lat,
-        lng
+        lng,
+        urgency: complaint.urgency || 'medium' // Ensure urgency is always set
       };
     });
 

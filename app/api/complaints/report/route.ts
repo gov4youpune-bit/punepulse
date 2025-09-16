@@ -1,12 +1,7 @@
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { getAuth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
 
-// Types
 interface ReportRequest {
   complaint_id: string;
   comments?: string;
@@ -18,59 +13,42 @@ interface ReportResponse {
   complaint: any;
 }
 
-/**
- * POST /api/complaints/report
- * 
- * Request body: { complaint_id: string, comments?: string, photos: string[] }
- * Response: { report: <created report>, complaint: <updated complaint> }
- * 
- * Requires worker authentication
- */
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    // Check authentication
-    const supabase = createRouteHandlerClient({ cookies });
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const { userId: clerkUserId } = getAuth(request);
     
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    if (!clerkUserId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     // Check if user is a worker
-    const { data: worker, error: workerError } = await supabaseAdmin
-      .from('workers')
-      .select('id, name, email')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
+    const { data: appUser, error: userError } = await supabaseAdmin
+      .from('app_users')
+      .select('id, role, email, display_name')
+      .eq('clerk_user_id', clerkUserId)
       .single();
 
-    if (workerError || !worker) {
-      return NextResponse.json({ 
-        error: 'Worker access required' 
-      }, { status: 403 });
+    if (userError || !appUser || appUser.role !== 'worker') {
+      return NextResponse.json({ error: 'Worker access required' }, { status: 403 });
     }
 
     const body: ReportRequest = await request.json();
-    const { complaint_id, comments, photos } = body;
+    const { complaint_id, comments, photos = [] } = body;
 
     if (!complaint_id) {
-      return NextResponse.json({ 
-        error: 'Missing required field: complaint_id' 
-      }, { status: 400 });
+      return NextResponse.json({ error: 'Missing complaint_id' }, { status: 400 });
     }
 
-    // Check if complaint exists and is assigned to this worker
+    // Verify the complaint is assigned to this worker
     const { data: complaint, error: complaintError } = await supabaseAdmin
       .from('complaints')
       .select('*')
       .eq('id', complaint_id)
-      .eq('assigned_to', worker.id)
+      .eq('assigned_to_clerk_id', clerkUserId)
       .single();
 
     if (complaintError || !complaint) {
-      return NextResponse.json({ 
-        error: 'Complaint not found or not assigned to you' 
-      }, { status: 404 });
+      return NextResponse.json({ error: 'Complaint not found or not assigned to you' }, { status: 404 });
     }
 
     // Create worker report
@@ -78,27 +56,26 @@ export async function POST(request: Request) {
       .from('worker_reports')
       .insert({
         complaint_id,
-        worker_id: worker.id,
+        worker_clerk_id: clerkUserId,
+        worker_user_id: appUser.id,
         comments: comments || null,
-        photos: photos || [],
+        photos: photos,
         status: 'submitted'
       })
       .select()
       .single();
 
     if (reportError) {
-      console.error('Report creation error:', reportError);
-      return NextResponse.json({ 
-        error: 'Failed to create report' 
-      }, { status: 500 });
+      console.error('Worker report creation error:', reportError);
+      return NextResponse.json({ error: 'Failed to create report' }, { status: 500 });
     }
 
     // Update complaint status
     const { data: updatedComplaint, error: updateError } = await supabaseAdmin
       .from('complaints')
       .update({
-        status: 'pending_verification',
-        verification_status: 'pending'
+        verification_status: 'pending',
+        status: 'admin_verification_pending'
       })
       .eq('id', complaint_id)
       .select()
@@ -106,31 +83,29 @@ export async function POST(request: Request) {
 
     if (updateError) {
       console.error('Complaint update error:', updateError);
-      return NextResponse.json({ 
-        error: 'Failed to update complaint status' 
-      }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to update complaint status' }, { status: 500 });
     }
 
     // Insert audit log
     await supabaseAdmin.from('audit_logs').insert({
       complaint_id,
-      actor: user.email || 'worker',
+      actor_clerk_id: clerkUserId,
+      actor_app_user_id: appUser.id,
       action: 'worker_report_submitted',
       payload: {
-        worker_name: worker.name,
         report_id: report.id,
-        photos_count: photos?.length || 0,
+        photos_count: photos.length,
         has_comments: !!comments,
         user_agent: request.headers.get('user-agent') ?? null
       }
     });
 
     const response: ReportResponse = { 
-      report, 
-      complaint: updatedComplaint 
+      report,
+      complaint: updatedComplaint
     };
-    return NextResponse.json(response, { status: 200 });
 
+    return NextResponse.json(response, { status: 200 });
   } catch (err: any) {
     console.error('[API] /api/complaints/report error', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

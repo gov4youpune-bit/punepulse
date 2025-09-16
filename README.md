@@ -12,18 +12,28 @@ A production-ready, camera-first civic complaint submission system for Pune Muni
 - **Multi-language Support**: English/Marathi interface (configurable)
 
 ### Admin Dashboard
-- **Supabase Authentication**: Magic-link email authentication for operators
+- **Clerk Authentication**: Modern authentication with role-based access control
 - **Complaint Management**: Full CRUD operations with status updates
+- **Worker Assignment**: Assign complaints to field workers with email notifications
+- **Worker Reports Review**: Review and approve/reject worker field reports
 - **Map Visualization**: Geographic clustering of complaints
 - **Portal Integration**: Automated submission to PMC/MSEDCL portals
 - **Audit Trail**: Complete activity logging and reporting
 - **Export Capabilities**: CSV downloads and bulk operations
 
+### Worker Portal
+- **Field Worker Dashboard**: View assigned complaints and submit progress reports
+- **Photo Upload**: Upload multiple photos showing work progress
+- **Status Reporting**: Submit comments and status updates
+- **Mobile Optimized**: Responsive design for field work
+
 ### Technical Architecture
 - **Frontend**: Next.js 14 + TypeScript + Tailwind CSS + PWA
+- **Authentication**: Clerk for user management and role-based access
 - **Backend**: Next.js API Routes + Supabase + BullMQ/Redis
 - **Database**: PostgreSQL with PostGIS for geospatial queries
 - **Storage**: Supabase Storage for file attachments
+- **Email**: Nodemailer with SMTP for notifications
 - **RPA**: Playwright for portal automation
 - **LLM**: GPT-3.5 for complaint classification and formatting
 - **Monitoring**: Comprehensive logging and error tracking
@@ -58,8 +68,10 @@ pune-pulse/
 ### Prerequisites
 - Node.js 18+ and npm
 - Supabase account and project
+- Clerk account for authentication
 - OpenAI API key
 - Redis instance (Upstash recommended)
+- SMTP server credentials
 
 ### 1. Clone Repository
 ```bash
@@ -77,8 +89,10 @@ cp .env.example .env.local
 
 Fill in all required environment variables:
 - Supabase project URL and keys
+- Clerk publishable key and secret key
 - OpenAI API key for LLM services
 - Redis URL for job queue
+- SMTP credentials for email notifications
 - Portal credentials (PMC/MSEDCL)
 
 ### 3. Database Setup
@@ -91,15 +105,52 @@ npx supabase db push
 # Or manually run SQL files in Supabase dashboard
 ```
 
-### 4. Development Server
+### 4. Clerk Authentication Setup
+
+#### Create Clerk Application
+1. Sign up at [clerk.com](https://clerk.com)
+2. Create a new application
+3. Copy your publishable key and secret key to `.env.local`
+
+#### Environment Variables
+```bash
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+```
+
+#### User Role Management
+The system uses role-based access control with these roles:
+- **admin**: Full access to admin dashboard and worker management
+- **worker**: Access to worker dashboard and assigned complaints  
+- **citizen**: Default role for complaint submission
+
+#### Creating User Mappings
+To create admin or worker accounts, insert records into the `app_users` table:
+
+```sql
+-- Create admin user
+INSERT INTO public.app_users (clerk_user_id, email, role, display_name)
+VALUES ('user_xxx', 'admin@example.com', 'admin', 'Admin User');
+
+-- Create worker user
+INSERT INTO public.app_users (clerk_user_id, email, role, display_name)
+VALUES ('user_yyy', 'worker@example.com', 'worker', 'Field Worker');
+
+-- Create worker record
+INSERT INTO public.workers (clerk_user_id, display_name, phone, area, is_active)
+VALUES ('user_yyy', 'Field Worker', '+91-9876543210', 'Ward 1', true);
+```
+
+### 5. Development Server
 ```bash
 npm run dev
 ```
 
 Access the application:
 - **Citizen Interface**: http://localhost:3000
-- **Admin Dashboard**: http://localhost:3000/admin
-- **API Documentation**: http://localhost:3000/api
+- **Admin Dashboard**: http://localhost:3000/admin (requires admin role)
+- **Worker Dashboard**: http://localhost:3000/worker/dashboard (requires worker role)
+- **Worker Login**: http://localhost:3000/worker/login
 
 ## 📱 PWA Installation
 
@@ -118,14 +169,25 @@ GET  /api/complaints/[token]      # Track complaint status
 POST /api/attachments             # Upload files
 ```
 
-### Admin Endpoints (Authenticated)
+### Admin Endpoints (Clerk Authenticated)
 ```
-GET    /api/admin/complaints      # List all complaints
-PUT    /api/admin/complaints/[id] # Update complaint
+GET    /api/complaints            # List all complaints
+POST   /api/complaints/assign     # Assign complaint to worker
+POST   /api/complaints/verify     # Approve/reject worker reports
+GET    /api/complaints/reports    # Get worker reports for review
 POST   /api/submit/pmc            # Submit to PMC portal
 POST   /api/submit/msedcl         # Submit to MSEDCL portal
-GET    /api/admin/stats           # Dashboard statistics
-POST   /api/admin/export          # Export data
+```
+
+### Worker Endpoints (Clerk Authenticated)
+```
+GET    /api/complaints/assigned   # Get assigned complaints
+POST   /api/complaints/report     # Submit worker report
+```
+
+### Public Endpoints
+```
+GET    /api/attachments/public    # Get signed URLs for attachments
 ```
 
 ### Webhook Endpoints
@@ -133,6 +195,35 @@ POST   /api/admin/export          # Export data
 POST /api/webhook/connector-result # Portal automation results
 POST /api/webhook/llm-classification # LLM processing results
 ```
+
+## 🔄 Assignment & Worker Flow
+
+### Complete Workflow
+1. **Citizen submits complaint** → Status: `submitted`
+2. **Admin assigns to worker** → Status: `assigned`, Email sent to worker
+3. **Worker submits report** → Status: `admin_verification_pending`
+4. **Admin reviews report** → Approve: Status: `resolved`, Email sent to citizen
+5. **Admin rejects report** → Status: `in_progress`, Email sent to worker
+
+### Assignment Process
+1. Admin selects complaint and clicks "Assign"
+2. Selects worker from dropdown
+3. Adds optional assignment note
+4. System updates complaint status and sends email to worker
+5. Worker receives email with dashboard link
+
+### Worker Report Process
+1. Worker logs in to `/worker/dashboard`
+2. Views assigned complaints
+3. Clicks "Submit Report" for a complaint
+4. Uploads photos and adds comments
+5. Submits report for admin review
+
+### Admin Review Process
+1. Admin goes to "Worker Replies" tab
+2. Reviews submitted reports with photos
+3. Clicks "Approve" → Complaint marked resolved, citizen notified
+4. Clicks "Reject" → Worker notified to resubmit
 
 ## 🤖 LLM Integration
 

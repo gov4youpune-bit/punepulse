@@ -92,7 +92,7 @@ export async function sendEmail({
 }
 
 // Complaint notification types
-type NotificationType = 'complaint_created' | 'complaint_submitted_to_portal' | 'complaint_status_changed' | 'complaint_verified';
+type NotificationType = 'complaint_created' | 'complaint_submitted_to_portal' | 'complaint_status_changed' | 'complaint_verified' | 'complaint_assigned' | 'complaint_resolved' | 'report_rejected';
 
 interface ComplaintData {
   id: string;

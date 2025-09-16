@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Shield, FileText, MapPin, Calendar, Upload, Send, CheckCircle, X } from 'lucide-react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
@@ -90,10 +90,10 @@ export default function WorkerDashboard() {
     return () => {
       isMounted = false;
     };
-  }, [supabase, setUser, router]);
+  }, [supabase, setUser, router, setLoading]);
 
   // Fetch assigned complaints
-  const fetchAssignedComplaints = async () => {
+  const fetchAssignedComplaints = useCallback(async () => {
     setLoadingComplaints(true);
     try {
       const res = await fetch('/api/complaints/assigned');
@@ -106,14 +106,14 @@ export default function WorkerDashboard() {
     } finally {
       setLoadingComplaints(false);
     }
-  };
+  }, [toast]);
 
   // Fetch complaints when user is loaded
   useEffect(() => {
     if (user) {
       fetchAssignedComplaints();
     }
-  }, [user]);
+  }, [user, fetchAssignedComplaints]);
 
   // Handle photo selection
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
