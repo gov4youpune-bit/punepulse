@@ -11,13 +11,9 @@ const isProtectedRoute = createRouteMatcher([
   '/api/workers(.*)',
 ])
 
-export default clerkMiddleware(async (auth, req) => {
-  console.log(`[MIDDLEWARE] Processing: ${req.nextUrl.pathname}`);
-  console.log(`[MIDDLEWARE] Is protected: ${isProtectedRoute(req)}`);
-  
+export default clerkMiddleware((auth, req) => {
   if (isProtectedRoute(req)) {
-    console.log(`[MIDDLEWARE] Protecting route: ${req.nextUrl.pathname}`);
-    await auth.protect()
+    auth.protect()
   }
 })
 
