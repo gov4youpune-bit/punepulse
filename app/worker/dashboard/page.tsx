@@ -7,7 +7,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { WorkerReportForm } from '@/components/worker-report-form';
 import { useToast } from '@/hooks/use-toast';
-import { MapPin, Calendar, Clock, FileText, Camera, CheckCircle, AlertCircle } from 'lucide-react';
+import { MapPin, Calendar, Clock, FileText, Camera, CheckCircle, AlertCircle, Navigation } from 'lucide-react';
 
 interface AssignedComplaint {
   id: string;
@@ -16,6 +16,7 @@ interface AssignedComplaint {
   subtype: string;
   description: string;
   location_text?: string;
+  location_point?: string;
   status: string;
   urgency?: string;
   created_at: string;
@@ -106,6 +107,22 @@ export default function WorkerDashboard() {
     }
   };
 
+  const formatLocation = (complaint: AssignedComplaint) => {
+    const parts = [];
+    
+    if (complaint.location_text) {
+      parts.push(complaint.location_text);
+    }
+    
+    if (complaint.location_point) {
+      parts.push(`GPS: ${complaint.location_point}`);
+    } else if (complaint.lat && complaint.lng) {
+      parts.push(`GPS: ${complaint.lat.toFixed(6)}, ${complaint.lng.toFixed(6)}`);
+    }
+    
+    return parts.length > 0 ? parts.join(' | ') : 'Location not specified';
+  };
+
   if (!isLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -186,7 +203,7 @@ export default function WorkerDashboard() {
                       <div className="flex items-center space-x-4 text-sm text-gray-500">
                         <div className="flex items-center">
                           <MapPin className="h-4 w-4 mr-1" />
-                          {complaint.location_text || 'Location not specified'}
+                          {formatLocation(complaint)}
                         </div>
                         <div className="flex items-center">
                           <Calendar className="h-4 w-4 mr-1" />
@@ -211,12 +228,28 @@ export default function WorkerDashboard() {
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         {complaint.attachments.map((attachment, index) => (
-                          <img
-                            key={index}
-                            src={`/api/attachments/public?key=${encodeURIComponent(attachment)}`}
-                            alt={`Attachment ${index + 1}`}
-                            className="w-full h-20 object-cover rounded border"
-                          />
+                          <div key={index} className="relative group">
+                            <img
+                              src={`/api/attachments/public?key=${encodeURIComponent(attachment)}`}
+                              alt={`Attachment ${index + 1}`}
+                              className="w-full h-20 object-cover rounded border"
+                              onError={(e) => {
+                                const target = e.target as HTMLImageElement;
+                                target.src = '/placeholder-image.png';
+                                target.alt = 'Image not available';
+                              }}
+                            />
+                            <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 rounded flex items-center justify-center opacity-0 group-hover:opacity-100">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="text-white bg-black/50 hover:bg-black/70"
+                                onClick={() => window.open(`/api/attachments/public?key=${encodeURIComponent(attachment)}`, '_blank')}
+                              >
+                                View Full Size
+                              </Button>
+                            </div>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -246,12 +279,28 @@ export default function WorkerDashboard() {
                             {report.photos.length > 0 && (
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                 {report.photos.map((photo, index) => (
-                                  <img
-                                    key={index}
-                                    src={`/api/attachments/public?key=${encodeURIComponent(photo)}`}
-                                    alt={`Report photo ${index + 1}`}
-                                    className="w-full h-16 object-cover rounded border"
-                                  />
+                                  <div key={index} className="relative group">
+                                    <img
+                                      src={`/api/attachments/public?key=${encodeURIComponent(photo)}`}
+                                      alt={`Report photo ${index + 1}`}
+                                      className="w-full h-16 object-cover rounded border"
+                                      onError={(e) => {
+                                        const target = e.target as HTMLImageElement;
+                                        target.src = '/placeholder-image.png';
+                                        target.alt = 'Image not available';
+                                      }}
+                                    />
+                                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all duration-200 rounded flex items-center justify-center opacity-0 group-hover:opacity-100">
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        className="text-white bg-black/50 hover:bg-black/70"
+                                        onClick={() => window.open(`/api/attachments/public?key=${encodeURIComponent(photo)}`, '_blank')}
+                                      >
+                                        View
+                                      </Button>
+                                    </div>
+                                  </div>
                                 ))}
                               </div>
                             )}

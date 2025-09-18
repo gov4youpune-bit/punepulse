@@ -13,6 +13,7 @@ interface AssignedComplaint {
   subtype: string;
   description: string;
   location_text?: string;
+  location_point?: string;
   status: string;
   urgency?: string;
   created_at: string;
@@ -61,37 +62,64 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Worker access required' }, { status: 403 });
     }
 
-    // Get assigned complaints for this worker
+    // Get assigned complaints for this worker from complaint_assignments table
     console.log('[ASSIGNED API] Fetching complaints for clerk user ID:', clerkUserId);
     
-    const { data: complaints, error: complaintsError } = await supabaseAdmin
-      .from('complaints')
+    const { data: assignments, error: assignmentsError } = await supabaseAdmin
+      .from('complaint_assignments')
       .select(`
-        *,
-        worker_reports (
+        complaint_id,
+        assigned_at,
+        note,
+        complaints (
           id,
-          comments,
-          photos,
+          token,
+          category,
+          subtype,
+          description,
+          location_text,
+          location_point,
           status,
-          created_at
+          urgency,
+          created_at,
+          updated_at,
+          attachments,
+          worker_reports (
+            id,
+            comments,
+            photos,
+            status,
+            created_at
+          )
         )
       `)
       .eq('assigned_to_clerk_id', clerkUserId)
       .order('assigned_at', { ascending: false });
 
-    if (complaintsError) {
-      console.error('Fetch assigned complaints error:', complaintsError);
+    if (assignmentsError) {
+      console.error('Fetch complaint assignments error:', assignmentsError);
       return NextResponse.json({ error: 'Failed to fetch assigned complaints' }, { status: 500 });
     }
 
-    console.log('[ASSIGNED API] Found complaints:', complaints?.length || 0);
+    console.log('[ASSIGNED API] Found assignments:', assignments?.length || 0);
 
     // Transform data and parse coordinates
-    const transformedComplaints: AssignedComplaint[] = complaints.map((complaint: any) => {
+    const transformedComplaints: AssignedComplaint[] = assignments.map((assignment: any) => {
+      const complaint = assignment.complaints;
       let lat: number | null = null;
       let lng: number | null = null;
 
-      if (complaint.location_text && typeof complaint.location_text === 'string') {
+      // Parse location_point if it exists
+      if (complaint.location_point && typeof complaint.location_point === 'string') {
+        const coords = complaint.location_point.trim().match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
+        if (coords) {
+          lat = parseFloat(coords[1]);
+          lng = parseFloat(coords[2]);
+        }
+      }
+
+      // Fallback: try to parse from location_text
+      if (!lat && !lng && complaint.location_text && typeof complaint.location_text === 'string') {
         const coords = complaint.location_text.trim().match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
         if (coords) {
           lat = parseFloat(coords[1]);
@@ -106,11 +134,12 @@ export async function GET(request: NextRequest) {
         subtype: complaint.subtype,
         description: complaint.description,
         location_text: complaint.location_text,
+        location_point: complaint.location_point,
         status: complaint.status,
         urgency: complaint.urgency || 'medium',
         created_at: complaint.created_at,
         updated_at: complaint.updated_at,
-        assigned_at: complaint.assigned_at,
+        assigned_at: assignment.assigned_at,
         attachments: complaint.attachments || [],
         lat,
         lng,

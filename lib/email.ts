@@ -244,16 +244,16 @@ function getComplaintSubmittedToPortalTemplate(complaint: ComplaintData, extra: 
   const trackingUrl = getTrackingUrl(complaint.token);
   const formattedDate = formatDate(complaint.created_at);
 
-  const subject = `Complaint Submitted to PMC Portal - ${complaint.token}`;
+  const subject = `Complaint Accepted and Queued to PMC Portal - ${complaint.token}`;
   
   const text = `
-Your complaint has been submitted to the Pune Municipal Corporation portal.
+Your complaint has been Accepted and Queued to the Pune Municipal Corporation portal.
 
 Complaint Details:
 - Token: ${complaint.token}
 - Category: ${complaint.category} - ${complaint.subtype}
 - Submitted: ${formattedDate}
-- Portal Status: Submitted
+- Portal Status: Accepted
 
 ${complaint.description}
 

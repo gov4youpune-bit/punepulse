@@ -87,6 +87,7 @@ interface Complaint {
   subtype: string;
   description: string;
   location_text?: string | null;
+  location_point?: string | null;
   status: string;
   created_at: string;
   updated_at: string;
@@ -958,7 +959,13 @@ export default function AdminDashboard() {
                         <span className="capitalize">{c.category} - {c.subtype}</span>
                         <span className="flex items-center">
                           <MapPin className="w-3 h-3 mr-1" />
-                          Ward {c.ward_number ?? '—'}
+                          {c.location_text ? (
+                            <span title={c.location_text}>
+                              {c.location_text.length > 30 ? `${c.location_text.substring(0, 30)}...` : c.location_text}
+                            </span>
+                          ) : (
+                            <span>No location</span>
+                          )}
                         </span>
                         <span>{new Date(c.created_at).toLocaleString()}</span>
                         {c._group && <span className="text-xs bg-gray-100 px-2 py-0.5 rounded ml-2">Group: {c._group}</span>}
@@ -1105,7 +1112,21 @@ export default function AdminDashboard() {
                     <div className="flex items-start justify-between">
                       <div>
                         <div className="font-mono text-sm font-medium text-blue-600">{c.token}</div>
-                        <div className="text-sm text-gray-700">{c.location_text ?? 'No coordinates'}</div>
+                        <div className="text-sm text-gray-700">
+                          {c.location_text ? (
+                            <div>
+                              <div className="font-medium">Address:</div>
+                              <div className="text-xs">{c.location_text}</div>
+                              {c.location_point && (
+                                <div className="text-xs text-gray-500 mt-1">
+                                  GPS: {c.location_point}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            'No location data'
+                          )}
+                        </div>
                       </div>
                       <div className="flex flex-col gap-2">
                         <Button variant="outline" size="sm" onClick={() => openDetails(c.token)}>Details</Button>
@@ -1198,10 +1219,31 @@ export default function AdminDashboard() {
                     <p className="text-gray-700 whitespace-pre-wrap">{selectedComplaint.description}</p>
                   </div>
 
-                  {selectedComplaint.location_text && (
+                  {(selectedComplaint.location_text || selectedComplaint.location_point) && (
                     <div>
                       <h5 className="font-medium text-sm text-gray-600 mb-1">Location</h5>
-                      <p className="text-gray-700">{selectedComplaint.location_text}</p>
+                      <div className="space-y-1">
+                        {selectedComplaint.location_text && (
+                          <p className="text-gray-700">
+                            <span className="font-medium">Address:</span> {selectedComplaint.location_text}
+                          </p>
+                        )}
+                        {selectedComplaint.location_point && (
+                          <p className="text-gray-700">
+                            <span className="font-medium">GPS Coordinates:</span> {selectedComplaint.location_point}
+                          </p>
+                        )}
+                        {(selectedComplaint.location_text || selectedComplaint.location_point) && (
+                          <a
+                            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedComplaint.location_point || selectedComplaint.location_text || '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:text-blue-800 text-sm underline"
+                          >
+                            Open in Google Maps
+                          </a>
+                        )}
+                      </div>
                     </div>
                   )}
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Send, Loader2, CheckCircle, Copy, Share2, Upload, X, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, CheckCircle, Copy, Share2, Upload, X, Image as ImageIcon, MapPin, Navigation } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -65,8 +65,11 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
   const [submissionResult, setSubmissionResult] = useState<{token: string; id: string} | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [location, setLocation] = useState<{lat: number; lng: number; address?: string} | null>(null);
+  const [manualAddress, setManualAddress] = useState('');
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
   
-  const { images, location, setImages } = useComplaintStore();
+  const { images, setImages } = useComplaintStore();
   const { toast } = useToast();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -80,6 +83,71 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
   }, [user, email]);
 
   const selectedCategory = categories.find(cat => cat.value === category);
+
+  // Location functions
+  const getCurrentLocation = async () => {
+    if (!navigator.geolocation) {
+      toast({
+        title: "Location Not Supported",
+        description: "Geolocation is not supported by this browser",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsGettingLocation(true);
+    
+    const options = {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 300000 // 5 minutes
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        setLocation({ lat: latitude, lng: longitude });
+        
+        // Try to get address from coordinates
+        try {
+          const response = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+          );
+          const data = await response.json();
+          if (data.locality) {
+            setLocation(prev => prev ? { ...prev, address: `${data.locality}, ${data.city}, ${data.principalSubdivision}` } : null);
+          }
+        } catch (error) {
+          console.log('Could not get address from coordinates');
+        }
+        
+        setIsGettingLocation(false);
+        toast({
+          title: "Location Captured",
+          description: "Your current location has been captured"
+        });
+      },
+      (error) => {
+        setIsGettingLocation(false);
+        toast({
+          title: "Location Error",
+          description: "Could not get your location. Please try again or enter manually.",
+          variant: "destructive"
+        });
+      },
+      options
+    );
+  };
+
+  const setManualLocation = () => {
+    if (manualAddress.trim()) {
+      setLocation({ lat: 0, lng: 0, address: manualAddress.trim() });
+      toast({
+        title: "Location Set",
+        description: "Manual location has been set"
+      });
+    }
+  };
 
   // Image handling functions
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -150,12 +218,13 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
             body: image,
             headers: { 'Content-Type': image.type }
           });
-          
+
           if (!uploadResult.ok) throw new Error(`Failed to upload ${image.name}`);
-          
+
           attachmentKeys.push(key);
+          
           setUploadProgress(prev => prev.map((item, idx) => 
-            idx === i ? { ...item, status: 'completed', progress: 100, key } : item
+            idx === i ? { ...item, status: 'completed', progress: 100 } : item
           ));
         }
       } else {
@@ -165,14 +234,17 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            filename: image.name,
-            contentType: image.type
+            files: [{
+              filename: image.name,
+              contentType: image.type
+            }]
           })
         });
         
         if (!uploadResponse.ok) throw new Error('Failed to get upload URL');
         
-        const { uploadUrl, key } = await uploadResponse.json();
+        const { uploads } = await uploadResponse.json();
+        const { uploadUrl, key } = uploads[0];
         
         setUploadProgress(prev => prev.map((item, idx) => 
           idx === 0 ? { ...item, status: 'uploading', progress: 0 } : item
@@ -183,23 +255,20 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
           body: image,
           headers: { 'Content-Type': image.type }
         });
-        
+
         if (!uploadResult.ok) throw new Error(`Failed to upload ${image.name}`);
-        
+
         attachmentKeys.push(key);
+        
         setUploadProgress(prev => prev.map((item, idx) => 
-          idx === 0 ? { ...item, status: 'completed', progress: 100, key } : item
+          idx === 0 ? { ...item, status: 'completed', progress: 100 } : item
         ));
       }
 
       return attachmentKeys;
     } catch (error) {
       console.error('Upload error:', error);
-      setUploadProgress(prev => prev.map(item => ({
-        ...item,
-        status: 'error',
-        error: error instanceof Error ? error.message : 'Upload failed'
-      })));
+      setUploadProgress(prev => prev.map(item => ({ ...item, status: 'error', error: error instanceof Error ? error.message : 'Upload failed' })));
       throw error;
     } finally {
       setIsUploading(false);
@@ -224,18 +293,21 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
       // Upload images first
       const attachmentKeys = await uploadImages();
 
-      // Submit complaint
+      // Prepare complaint data
       const complaintData = {
         category,
         subtype,
         description: description.trim(),
+        email: email.trim() || null,
+        attachments: attachmentKeys,
         lat: location?.lat || null,
         lng: location?.lng || null,
-        location_text: location?.address || '',
-        email: email.trim() || null,
-        attachments: attachmentKeys
+        location_text: location?.address || manualAddress.trim() || null,
+        location_point: location?.lat && location?.lng ? `${location.lat}, ${location.lng}` : null,
+        urgency: 'medium' // Default urgency
       };
 
+      // Submit complaint
       const response = await fetch('/api/complaints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -250,19 +322,20 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
       const result = await response.json();
       setSubmissionResult(result);
       
+      // Clear form data
+      setImages([]);
+      setLocation(null);
+      setManualAddress('');
+      
       toast({
-        title: "Complaint Submitted!",
-        description: `Your tracking token is ${result.token}`,
+        title: "Complaint Submitted",
+        description: "Your complaint has been submitted successfully"
       });
-
-      // Redirect to the shareable track page immediately
-      router.push(`/track/${encodeURIComponent(result.token)}`);
-
     } catch (error) {
-      console.error('Submission error:', error);
+      console.error('Submit error:', error);
       toast({
         title: "Submission Failed",
-        description: error instanceof Error ? error.message : "Please try again",
+        description: error instanceof Error ? error.message : 'Failed to submit complaint',
         variant: "destructive"
       });
     } finally {
@@ -270,30 +343,42 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
     }
   };
 
-  const handleCopyToken = () => {
-    if (submissionResult) {
-      navigator.clipboard.writeText(submissionResult.token);
-      toast({
-        title: "Token Copied",
-        description: "Tracking token copied to clipboard"
-      });
+  const handleCopyToken = async () => {
+    if (submissionResult?.token) {
+      try {
+        await navigator.clipboard.writeText(submissionResult.token);
+        toast({
+          title: "Copied",
+          description: "Tracking token copied to clipboard"
+        });
+      } catch (error) {
+        toast({
+          title: "Copy Failed",
+          description: "Could not copy token to clipboard",
+          variant: "destructive"
+        });
+      }
     }
   };
 
   const handleShare = async () => {
-    if (submissionResult && navigator.share) {
-      try {
-        await navigator.share({
-          title: 'Pune Pulse Complaint',
-          text: `Complaint submitted successfully. Tracking token: ${submissionResult.token}`,
-          url: `${window.location.origin}/track/${submissionResult.token}`
-        });
-      } catch (err) {
-        // Fallback to copy
-        handleCopyToken();
+    if (submissionResult?.token) {
+      const shareData = {
+        title: 'Complaint Tracking Token',
+        text: `Track your complaint: ${submissionResult.token}`,
+        url: `${window.location.origin}/track/${submissionResult.token}`
+      };
+
+      if (navigator.share) {
+        try {
+          await navigator.share(shareData);
+        } catch (error) {
+          console.log('Share cancelled or failed');
+        }
+      } else {
+        // Fallback: copy to clipboard
+        await handleCopyToken();
       }
-    } else {
-      handleCopyToken();
     }
   };
 
@@ -419,6 +504,77 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
             </div>
           </Card>
 
+          {/* Location Capture */}
+          <Card className="p-6">
+            <div className="space-y-4">
+              <div>
+                <Label>Location *</Label>
+                <p className="text-sm text-gray-600 mb-4">
+                  Capture your current location or enter manually
+                </p>
+                
+                <div className="space-y-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={getCurrentLocation}
+                    disabled={isGettingLocation}
+                    className="w-full"
+                  >
+                    {isGettingLocation ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Getting Location...
+                      </>
+                    ) : (
+                      <>
+                        <Navigation className="w-4 h-4 mr-2" />
+                        Use Current Location
+                      </>
+                    )}
+                  </Button>
+                  
+                  <div className="text-center text-sm text-gray-500">OR</div>
+                  
+                  <div className="space-y-2">
+                    <Input
+                      placeholder="Enter location manually (e.g., Near ABC Mall, Pune)"
+                      value={manualAddress}
+                      onChange={(e) => setManualAddress(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={setManualLocation}
+                      disabled={!manualAddress.trim()}
+                      className="w-full"
+                    >
+                      <MapPin className="w-4 h-4 mr-2" />
+                      Set Manual Location
+                    </Button>
+                  </div>
+                </div>
+                
+                {location && (
+                  <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center text-green-800">
+                      <MapPin className="w-4 h-4 mr-2" />
+                      <span className="font-medium">Location Set</span>
+                    </div>
+                    <p className="text-sm text-green-700 mt-1">
+                      {location.address || manualAddress}
+                    </p>
+                    {location.lat && location.lng && (
+                      <p className="text-xs text-green-600 mt-1">
+                        Coordinates: {location.lat.toFixed(6)}, {location.lng.toFixed(6)}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
+
           {/* Image Upload */}
           <Card className="p-6">
             <div className="space-y-4">
@@ -441,7 +597,7 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
                     className="w-full"
                   >
                     <Upload className="w-4 h-4 mr-2" />
-                    Select Images
+                    Select Images from Gallery
                   </Button>
                   <p className="text-xs text-gray-500 mt-1">
                     Select multiple images to attach to your complaint
@@ -571,7 +727,7 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Location:</span>
-                <span>{location?.address ? 'Set' : 'Not set'}</span>
+                <span>{location?.address || manualAddress ? 'Set' : 'Not set'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Category:</span>
@@ -589,7 +745,7 @@ export function ComplaintForm({ onBack }: ComplaintFormProps) {
             type="submit" 
             className="w-full" 
             size="lg"
-            disabled={isSubmitting || isUploading || !category || !subtype || !description.trim()}
+            disabled={isSubmitting || isUploading || !category || !subtype || !description.trim() || (!location && !manualAddress.trim())}
           >
             {isUploading ? (
               <>
