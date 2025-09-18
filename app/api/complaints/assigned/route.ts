@@ -45,24 +45,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check if user is a worker
-    const { data: appUsers, error: userError } = await supabaseAdmin
-      .from('app_users')
-      .select('role, email')
-      .eq('clerk_user_id', clerkUserId);
-
-    if (userError) {
-      console.error('Fetch app_users error:', userError);
-      return NextResponse.json({ error: 'Failed to verify user role' }, { status: 500 });
-    }
-
-    const appUser = appUsers && appUsers.length > 0 ? appUsers[0] : null;
-    if (!appUser || appUser.role !== 'worker') {
-      console.log('[ASSIGNED API] User is not a worker or not found:', appUser?.role || 'not found');
-      return NextResponse.json({ error: 'Worker access required' }, { status: 403 });
-    }
-
     // Get assigned complaints for this worker from complaint_assignments table
+    // We'll check if they have assignments rather than checking app_users table
     console.log('[ASSIGNED API] Fetching complaints for clerk user ID:', clerkUserId);
     
     const { data: assignments, error: assignmentsError } = await supabaseAdmin
@@ -102,6 +86,12 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('[ASSIGNED API] Found assignments:', assignments?.length || 0);
+
+    // If no assignments found, return empty array (user might not be a worker or have no assignments)
+    if (!assignments || assignments.length === 0) {
+      console.log('[ASSIGNED API] No assignments found for user:', clerkUserId);
+      return NextResponse.json({ complaints: [] }, { status: 200 });
+    }
 
     // Transform data and parse coordinates
     const transformedComplaints: AssignedComplaint[] = assignments.map((assignment: any) => {

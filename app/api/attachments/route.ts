@@ -50,12 +50,8 @@ export async function POST(req: Request) {
     const supabase = createRouteHandlerClient({ cookies });
     const body = await req.json();
 
-    // Resolve bucket
-    const envBucket = process.env.NEXT_PUBLIC_STORAGE_BUCKET;
-    const bucket = body.bucket || envBucket;
-    if (!bucket) {
-      return NextResponse.json({ error: 'Storage bucket not configured' }, { status: 500 });
-    }
+    // Resolve bucket - use complaint-attachments bucket
+    const bucket = body.bucket || 'complaint-attachments';
 
     // Check if this is a batch request
     if (body.files && Array.isArray(body.files)) {

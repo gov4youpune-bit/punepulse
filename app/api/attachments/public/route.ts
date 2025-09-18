@@ -14,10 +14,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Missing key parameter' }, { status: 400 });
     }
 
-    // Create signed URL for the attachment
+    console.log('[ATTACHMENTS API] Fetching attachment with key:', key);
+
+    // Create signed URL for the attachment from the complaint-attachments bucket
     // Handle both old format (with folders) and new format (direct keys)
     let { data, error } = await supabaseAdmin.storage
-      .from('attachments')
+      .from('complaint-attachments')
       .createSignedUrl(key, 3600); // 1 hour expiry
 
     // If the key has folder structure and fails, try without the folder prefix
@@ -26,7 +28,7 @@ export async function GET(request: Request) {
       const simpleKey = key.split('/').pop(); // Get just the filename
       if (simpleKey) {
         const retryResult = await supabaseAdmin.storage
-          .from('attachments')
+          .from('complaint-attachments')
           .createSignedUrl(simpleKey, 3600);
         
         if (retryResult.data && !retryResult.error) {
@@ -49,6 +51,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'No signed URL generated' }, { status: 500 });
     }
 
+    console.log('[ATTACHMENTS API] Successfully generated signed URL for:', key);
     return NextResponse.json({ url: data.signedUrl });
   } catch (err: any) {
     console.error('[API] /api/attachments/public error', err);
