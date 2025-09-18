@@ -632,13 +632,18 @@ export default function AdminDashboard() {
       // Update complaint in state
       setComplaints(prev => prev.map(c => 
         c.id === selectedComplaintForAssign.id 
-          ? { ...c, ...data.complaint }
+          ? { 
+              ...c, 
+              assigned_to_clerk_id: selectedWorker.clerk_user_id,
+              assigned_at: new Date().toISOString(),
+              status: 'assigned'
+            }
           : c
       ));
 
       toast({ 
         title: 'Assigned', 
-        description: `Complaint assigned to ${data.assignment.worker?.name || 'worker'} successfully` 
+        description: `Complaint assigned to ${selectedWorker.display_name || 'worker'} successfully` 
       });
 
       setAssignDialogOpen(false);

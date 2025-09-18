@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
-import { Camera, X, Upload, Loader2 } from 'lucide-react';
+import { Camera, X, Upload, Loader2, CheckCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface AssignedComplaint {
@@ -34,99 +34,129 @@ interface WorkerReportFormProps {
 export function WorkerReportForm({ complaint, onClose, onSubmitted }: WorkerReportFormProps) {
   const { toast } = useToast();
   const [comments, setComments] = useState('');
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const handlePhotoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
+    const newFiles = Array.from(files);
+    setPhotos(prev => [...prev, ...newFiles]);
+    
+    // Create preview URLs
+    const newUrls = newFiles.map(file => URL.createObjectURL(file));
+    setPhotoUrls(prev => [...prev, ...newUrls]);
+  };
+
+  const removePhoto = (index: number) => {
+    setPhotos(prev => prev.filter((_, i) => i !== index));
+    setPhotoUrls(prev => {
+      URL.revokeObjectURL(prev[index]);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const uploadPhotos = async (): Promise<string[]> => {
+    if (photos.length === 0) return [];
+
     setUploading(true);
     try {
-      const uploadPromises = Array.from(files).map(async (file) => {
+      const uploadPromises = photos.map(async (file) => {
         // Create upload URL
         const uploadRes = await fetch('/api/attachments', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             filename: file.name,
-            contentType: file.type,
-            bucket: 'attachments'
+            contentType: file.type
           })
         });
 
-        if (!uploadRes.ok) throw new Error('Failed to get upload URL');
+        if (!uploadRes.ok) {
+          throw new Error(`Upload URL creation failed: ${uploadRes.statusText}`);
+        }
+
         const { uploadUrl, key } = await uploadRes.json();
 
-        // Upload file
-        const uploadResult = await fetch(uploadUrl, {
+        // Upload file to Supabase
+        const uploadToSupabase = await fetch(uploadUrl, {
           method: 'PUT',
           body: file,
           headers: { 'Content-Type': file.type }
         });
 
-        if (!uploadResult.ok) throw new Error('Failed to upload file');
+        if (!uploadToSupabase.ok) {
+          throw new Error(`File upload failed: ${uploadToSupabase.statusText}`);
+        }
+
         return key;
       });
 
       const uploadedKeys = await Promise.all(uploadPromises);
-      setPhotos(prev => [...prev, ...uploadedKeys]);
-      
-      toast({ 
-        title: 'Photos Uploaded', 
-        description: `Successfully uploaded ${uploadedKeys.length} photo(s)` 
-      });
-    } catch (err) {
-      console.error('Photo upload error:', err);
-      toast({ 
-        title: 'Upload Failed', 
-        description: 'Failed to upload photos. Please try again.', 
-        variant: 'destructive' 
-      });
+      console.log('[WORKER REPORT] Photos uploaded successfully:', uploadedKeys);
+      return uploadedKeys;
+    } catch (error) {
+      console.error('[WORKER REPORT] Photo upload error:', error);
+      throw error;
     } finally {
       setUploading(false);
     }
   };
 
-  const removePhoto = (index: number) => {
-    setPhotos(prev => prev.filter((_, i) => i !== index));
-  };
-
   const handleSubmit = async () => {
-    if (photos.length === 0 && !comments.trim()) {
-      toast({ 
-        title: 'Report Required', 
-        description: 'Please add photos or comments to your report', 
-        variant: 'destructive' 
+    if (!comments.trim() && photos.length === 0) {
+      toast({
+        title: 'Error',
+        description: 'Please provide comments or upload photos',
+        variant: 'destructive'
       });
       return;
     }
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/complaints/report', {
+      // Upload photos first
+      const uploadedPhotos = await uploadPhotos();
+
+      // Submit report
+      const reportData = {
+        complaint_id: complaint.id,
+        comments: comments.trim(),
+        photos: uploadedPhotos
+      };
+
+      console.log('[WORKER REPORT] Submitting report:', reportData);
+
+      const response = await fetch('/api/complaints/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          complaint_id: complaint.id,
-          comments: comments.trim() || null,
-          photos
-        })
+        body: JSON.stringify(reportData)
       });
 
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
+      if (!response.ok) {
+        const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to submit report');
       }
 
+      const result = await response.json();
+      console.log('[WORKER REPORT] Report submitted successfully:', result);
+
+      toast({
+        title: 'Success',
+        description: 'Report submitted successfully',
+        variant: 'default'
+      });
+
       onSubmitted();
-    } catch (err) {
-      console.error('Report submission error:', err);
-      toast({ 
-        title: 'Submission Failed', 
-        description: err instanceof Error ? err.message : 'Failed to submit report', 
-        variant: 'destructive' 
+    } catch (error: any) {
+      console.error('[WORKER REPORT] Submit error:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to submit report',
+        variant: 'destructive'
       });
     } finally {
       setSubmitting(false);
@@ -134,134 +164,131 @@ export function WorkerReportForm({ complaint, onClose, onSubmitted }: WorkerRepo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-2xl bg-white rounded-lg shadow-lg max-h-[90vh] overflow-auto">
-        <div className="p-6 border-b">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-medium">Submit Report</h3>
-              <p className="text-sm text-gray-500">{complaint.token} - {complaint.category}</p>
-            </div>
-            <Button variant="ghost" onClick={onClose} disabled={submitting}>
-              <X className="w-4 h-4" />
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold">Submit Worker Report</h2>
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              <X className="h-4 w-4" />
             </Button>
           </div>
-        </div>
 
-        <div className="p-6 space-y-6">
-          {/* Complaint Details */}
-          <Card className="p-4">
-            <h4 className="font-medium text-gray-900 mb-2">Complaint Details</h4>
-            <p className="text-gray-700 text-sm mb-2">{complaint.description}</p>
-            {complaint.location_text && (
-              <p className="text-gray-500 text-sm">{complaint.location_text}</p>
-            )}
-          </Card>
+          {/* Complaint Info */}
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium mb-2">Complaint Details</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              <strong>ID:</strong> {complaint.token}
+            </p>
+            <p className="text-sm text-gray-600 mb-1">
+              <strong>Category:</strong> {complaint.category} - {complaint.subtype}
+            </p>
+            <p className="text-sm text-gray-600">
+              <strong>Description:</strong> {complaint.description}
+            </p>
+          </div>
 
           {/* Comments */}
-          <div>
-            <Label htmlFor="comments" className="text-sm font-medium">
-              Comments (Optional)
-            </Label>
+          <div className="mb-6">
+            <Label htmlFor="comments">Comments *</Label>
             <Textarea
               id="comments"
-              placeholder="Describe the work completed, issues found, or any additional information..."
+              placeholder="Describe the work done, findings, or any updates..."
               value={comments}
               onChange={(e) => setComments(e.target.value)}
-              rows={4}
               className="mt-1"
+              rows={4}
             />
           </div>
 
           {/* Photo Upload */}
-          <div>
-            <Label className="text-sm font-medium">Photos</Label>
+          <div className="mb-6">
+            <Label>Photos (Optional)</Label>
             <div className="mt-2">
               <input
                 type="file"
-                accept="image/*"
+                id="photos"
                 multiple
-                onChange={handlePhotoUpload}
+                accept="image/*"
+                onChange={handlePhotoSelect}
                 className="hidden"
-                id="photo-upload"
-                disabled={uploading}
               />
-              <label
-                htmlFor="photo-upload"
-                className={`inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 cursor-pointer ${
-                  uploading ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => document.getElementById('photos')?.click()}
+                className="w-full"
+                disabled={uploading}
               >
                 {uploading ? (
                   <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     Uploading...
                   </>
                 ) : (
                   <>
-                    <Camera className="w-4 h-4 mr-2" />
-                    Add Photos
+                    <Camera className="h-4 w-4 mr-2" />
+                    Select Photos
                   </>
                 )}
-              </label>
-              <p className="text-xs text-gray-500 mt-1">
-                Upload photos showing the completed work or current status
-              </p>
+              </Button>
             </div>
 
-            {/* Photo Preview */}
-            {photos.length > 0 && (
+            {/* Photo Previews */}
+            {photoUrls.length > 0 && (
               <div className="mt-4">
-                <h5 className="text-sm font-medium text-gray-900 mb-2">
-                  Uploaded Photos ({photos.length})
-                </h5>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {photos.map((photoKey, index) => (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {photoUrls.map((url, index) => (
                     <div key={index} className="relative group">
                       <img
-                        src={`/api/attachments/public?key=${encodeURIComponent(photoKey)}`}
-                        alt={`Photo ${index + 1}`}
-                        className="w-full h-24 object-cover rounded-lg border"
+                        src={url}
+                        alt={`Preview ${index + 1}`}
+                        className="w-full h-24 object-cover rounded border"
                       />
-                      <button
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity"
                         onClick={() => removePhoto(index)}
-                        className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                        disabled={submitting}
                       >
-                        <X className="w-3 h-3" />
-                      </button>
+                        <X className="h-3 w-3" />
+                      </Button>
                     </div>
                   ))}
                 </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  {photos.length} photo(s) selected
+                </p>
               </div>
             )}
           </div>
 
           {/* Submit Button */}
-          <div className="flex gap-3 pt-4 border-t">
+          <div className="flex gap-3">
             <Button
               onClick={handleSubmit}
-              disabled={submitting || (photos.length === 0 && !comments.trim())}
+              disabled={submitting || uploading || (!comments.trim() && photos.length === 0)}
               className="flex-1"
             >
               {submitting ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Submitting Report...
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Submitting...
                 </>
               ) : (
                 <>
-                  <Upload className="w-4 h-4 mr-2" />
+                  <CheckCircle className="h-4 w-4 mr-2" />
                   Submit Report
                 </>
               )}
             </Button>
-            <Button variant="outline" onClick={onClose} disabled={submitting}>
+            <Button variant="outline" onClick={onClose}>
               Cancel
             </Button>
           </div>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }
