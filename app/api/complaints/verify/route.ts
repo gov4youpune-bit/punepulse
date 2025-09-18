@@ -70,8 +70,8 @@ export async function POST(request: NextRequest) {
 
     if (action === 'verify') {
       // Update complaint as resolved
-      const { data: updatedComplaint, error: updateError } = await supabaseAdmin
-        .from('complaints')
+    const { data: updatedComplaint, error: updateError } = await supabaseAdmin
+      .from('complaints')
         .update({
           status: 'resolved',
           verification_status: 'verified',
@@ -79,12 +79,12 @@ export async function POST(request: NextRequest) {
           resolved_by_clerk_id: clerkUserId,
           resolution_notes: note || null
         })
-        .eq('id', complaint_id)
-        .select()
-        .single();
+      .eq('id', complaint_id)
+      .select()
+      .single();
 
-      if (updateError) {
-        console.error('Complaint update error:', updateError);
+    if (updateError) {
+      console.error('Complaint update error:', updateError);
         return NextResponse.json({ error: 'Failed to update complaint' }, { status: 500 });
       }
 
@@ -98,20 +98,20 @@ export async function POST(request: NextRequest) {
         if (reportUpdateError) {
           console.error('Report update error:', reportUpdateError);
         }
-      }
+    }
 
-      // Insert audit log
-      await supabaseAdmin.from('audit_logs').insert({
-        complaint_id,
+    // Insert audit log
+    await supabaseAdmin.from('audit_logs').insert({
+      complaint_id,
         actor_clerk_id: clerkUserId,
         actor_app_user_id: appUser.id,
         action: 'verify_resolution',
-        payload: {
-          report_id: report_id || null,
-          note: note || null,
-          user_agent: request.headers.get('user-agent') ?? null
-        }
-      });
+      payload: {
+        report_id: report_id || null,
+        note: note || null,
+        user_agent: request.headers.get('user-agent') ?? null
+      }
+    });
 
       // Send resolved email to reporter
       if (complaint.email) {
@@ -343,14 +343,14 @@ Pune Pulse Admin Team
             console.error('Failed to send rejection email:', emailResult.error);
           }
         }
-      }
+    }
 
-      const response: VerifyResponse = { 
-        complaint: updatedComplaint,
+    const response: VerifyResponse = { 
+      complaint: updatedComplaint,
         report: report ? { ...report, status: 'rejected' } : null
-      };
+    };
 
-      return NextResponse.json(response, { status: 200 });
+    return NextResponse.json(response, { status: 200 });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

@@ -35,6 +35,20 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // Get worker ID from workers table
+    const { data: workerData, error: workerError } = await supabaseAdmin
+      .from('workers')
+      .select('id')
+      .eq('clerk_user_id', assigned_to_clerk_id)
+      .single();
+
+    if (workerError || !workerData) {
+      console.error('[ASSIGN API] Worker not found:', workerError);
+      return NextResponse.json({ 
+        error: 'Worker not found in workers table' 
+      }, { status: 404 });
+    }
+
     // SIMPLIFIED APPROACH: Direct assignment without complex checks
     // 1. Update the complaint with assignment info
     const { data: updatedComplaint, error: updateError } = await supabaseAdmin
@@ -56,11 +70,12 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
 
-    // 2. Create assignment record
+    // 2. Create assignment record with worker ID
     const { data: assignment, error: assignmentError } = await supabaseAdmin
       .from('complaint_assignments')
       .insert({
         complaint_id: complaint_id,
+        assigned_to: workerData.id, // This was missing!
         assigned_to_clerk_id: assigned_to_clerk_id,
         assigned_by_clerk_id: clerkUserId,
         note: note || 'Complaint assigned',
@@ -73,22 +88,23 @@ export async function POST(request: NextRequest) {
 
     if (assignmentError) {
       console.error('[ASSIGN API] Error creating assignment:', assignmentError);
-      // Don't fail the whole operation if assignment record fails
-      console.log('[ASSIGN API] Assignment record failed, but complaint was updated');
+      return NextResponse.json({ 
+        error: 'Failed to create assignment record' 
+      }, { status: 500 });
     }
 
     // 3. Send email notification (optional)
     try {
       // Get worker email from app_users table
-      const { data: workerData } = await supabaseAdmin
+      const { data: workerEmailData } = await supabaseAdmin
         .from('app_users')
         .select('email, display_name')
         .eq('clerk_user_id', assigned_to_clerk_id)
         .single();
 
-      if (workerData?.email) {
+      if (workerEmailData?.email) {
         await sendEmail({
-          to: workerData.email,
+          to: workerEmailData.email,
           subject: 'New Complaint Assignment',
           text: `New Complaint Assigned - ${updatedComplaint.token}`,
           html: `
@@ -102,7 +118,7 @@ export async function POST(request: NextRequest) {
             <p>Please log in to your worker dashboard to view and respond to this complaint.</p>
           `
         });
-        console.log('[ASSIGN API] Email notification sent to:', workerData.email);
+        console.log('[ASSIGN API] Email notification sent to:', workerEmailData.email);
       }
     } catch (emailError) {
       console.error('[ASSIGN API] Email notification failed:', emailError);
