@@ -56,10 +56,6 @@ export default function RootLayout({
   return (
     <ClerkProvider
       publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-      signInUrl="https://accounts.shaktighssp.shop/sign-in"
-      signUpUrl="https://accounts.shaktighssp.shop/sign-up"
-      afterSignInUrl="https://shaktighssp.shop"
-      afterSignUpUrl="https://shaktighssp.shop"
     >
       <html lang="en" suppressHydrationWarning>
         <head>
