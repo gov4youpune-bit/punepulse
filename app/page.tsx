@@ -54,7 +54,7 @@ export default function HomePage() {
                 variant="outline" 
                 size="sm" 
                 className="text-green-600 border-green-200 hover:bg-green-50"
-                onClick={() => window.open('https://punepulse.vercel.app/worker/login', '_blank')}
+                onClick={() => window.open('https://shaktighssp.shop/worker/login', '_blank')}
               >
                 <Users className="w-4 h-4 mr-2" />
                 Worker Login

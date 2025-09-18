@@ -71,7 +71,7 @@ export default function WorkerLoginPage() {
                 You&apos;re signed in! Access your dashboard to view assigned complaints.
               </p>
               <Button 
-                onClick={() => window.location.href = 'https://punepulse.vercel.app/worker/dashboard'}
+                onClick={() => window.location.href = 'https://shaktighssp.shop/worker/dashboard'}
                 className="w-full"
               >
                 Go to Dashboard
