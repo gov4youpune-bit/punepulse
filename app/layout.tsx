@@ -56,8 +56,10 @@ export default function RootLayout({
   return (
     <ClerkProvider
       publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-      signInUrl="/sign-in"
-      signUpUrl="/sign-up"
+      signInUrl="https://accounts.shaktighssp.shop/sign-in"
+      signUpUrl="https://accounts.shaktighssp.shop/sign-up"
+      afterSignInUrl="https://shaktighssp.shop"
+      afterSignUpUrl="https://shaktighssp.shop"
     >
       <html lang="en" suppressHydrationWarning>
         <head>
@@ -70,8 +72,8 @@ export default function RootLayout({
         <body className={cn(inter.className, "min-h-screen bg-background antialiased")}>
           <header className="flex justify-end items-center p-4 gap-4 h-16">
             <SignedOut>
-              <SignInButton />
-              <SignUpButton />
+              <SignInButton mode="redirect" />
+              <SignUpButton mode="redirect" />
             </SignedOut>
             <SignedIn>
               <UserButton />

@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useUser } from '@clerk/nextjs';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { MapPin, Calendar, FileText, Camera, MessageSquare } from 'lucide-react';
 import { WorkerReportForm } from '@/components/worker-report-form';
 import { useToast } from '@/hooks/use-toast';
+import { MapPin, Calendar, Clock, FileText, Camera, CheckCircle, AlertCircle } from 'lucide-react';
 
 interface AssignedComplaint {
   id: string;
@@ -33,26 +33,38 @@ interface AssignedComplaint {
   }>;
 }
 
+interface AssignedResponse {
+  complaints: AssignedComplaint[];
+}
+
 export default function WorkerDashboard() {
   const { user, isLoaded } = useUser();
-  const { toast } = useToast();
   const [complaints, setComplaints] = useState<AssignedComplaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedComplaint, setSelectedComplaint] = useState<AssignedComplaint | null>(null);
   const [showReportForm, setShowReportForm] = useState(false);
+  const { toast } = useToast();
 
   const fetchAssignedComplaints = useCallback(async () => {
     try {
-      const res = await fetch('/api/complaints/assigned');
-      if (!res.ok) throw new Error('Failed to fetch assigned complaints');
-      const data = await res.json();
+      setLoading(true);
+      const response = await fetch('/api/complaints/assigned');
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Please sign in to access this page');
+        }
+        throw new Error('Failed to fetch assigned complaints');
+      }
+      
+      const data: AssignedResponse = await response.json();
       setComplaints(data.complaints || []);
-    } catch (err) {
-      console.error('Failed to fetch assigned complaints:', err);
-      toast({ 
-        title: 'Error', 
-        description: 'Failed to load assigned complaints', 
-        variant: 'destructive' 
+    } catch (error) {
+      console.error('Failed to fetch assigned complaints:', error);
+      toast({
+        title: 'Error',
+        description: error instanceof Error ? error.message : 'Failed to fetch complaints',
+        variant: 'destructive'
       });
     } finally {
       setLoading(false);
@@ -65,18 +77,28 @@ export default function WorkerDashboard() {
     }
   }, [isLoaded, user, fetchAssignedComplaints]);
 
+  const handleReportSubmitted = () => {
+    toast({
+      title: 'Report Submitted',
+      description: 'Your report has been submitted for admin review'
+    });
+    setShowReportForm(false);
+    setSelectedComplaint(null);
+    fetchAssignedComplaints(); // Refresh the list
+  };
+
   const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
+    switch (status) {
       case 'assigned': return 'bg-blue-100 text-blue-800';
-      case 'admin_verification_pending': return 'bg-yellow-100 text-yellow-800';
+      case 'in_progress': return 'bg-yellow-100 text-yellow-800';
+      case 'admin_verification_pending': return 'bg-purple-100 text-purple-800';
       case 'resolved': return 'bg-green-100 text-green-800';
-      case 'rejected': return 'bg-red-100 text-red-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
 
-  const getUrgencyColor = (urgency = 'medium') => {
-    switch (urgency?.toLowerCase()) {
+  const getUrgencyColor = (urgency: string) => {
+    switch (urgency) {
       case 'high': return 'bg-red-100 text-red-800';
       case 'medium': return 'bg-yellow-100 text-yellow-800';
       case 'low': return 'bg-green-100 text-green-800';
@@ -84,20 +106,13 @@ export default function WorkerDashboard() {
     }
   };
 
-  const handleReportSubmitted = () => {
-    setShowReportForm(false);
-    setSelectedComplaint(null);
-    fetchAssignedComplaints();
-    toast({ 
-      title: 'Report Submitted', 
-      description: 'Your report has been submitted for admin review' 
-    });
-  };
-
   if (!isLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
       </div>
     );
   }
@@ -108,7 +123,7 @@ export default function WorkerDashboard() {
         <div className="text-center">
           <h1 className="text-2xl font-bold text-gray-900 mb-4">Worker Access Required</h1>
           <p className="text-gray-600 mb-8">Please sign in to access the worker dashboard.</p>
-          <Button onClick={() => window.location.href = '/sign-in'}>
+          <Button onClick={() => window.location.href = 'https://accounts.shaktighssp.shop/sign-in'}>
             Sign In
           </Button>
         </div>
@@ -123,131 +138,134 @@ export default function WorkerDashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">Worker Dashboard</h1>
-              <p className="text-sm text-gray-500">Assigned Complaints</p>
+              <h1 className="text-2xl font-bold text-gray-900">Worker Dashboard</h1>
+              <p className="text-gray-600">Welcome, {user.emailAddresses[0]?.emailAddress}</p>
             </div>
-            <div className="text-right">
-              <p className="text-sm font-medium text-gray-900">{user.emailAddresses[0]?.emailAddress}</p>
-              <p className="text-xs text-gray-500">Field Worker</p>
+            <div className="flex items-center space-x-4">
+              <Badge variant="outline" className="text-sm">
+                {complaints.length} Assigned
+              </Badge>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {loading ? (
           <div className="text-center py-12">
-            <div className="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-4" />
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
             <p className="text-gray-600">Loading assigned complaints...</p>
           </div>
         ) : complaints.length === 0 ? (
-          <Card className="p-8 text-center">
-            <FileText className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+          <div className="text-center py-12">
+            <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No Assigned Complaints</h3>
             <p className="text-gray-600">You don&apos;t have any assigned complaints at the moment.</p>
-          </Card>
+          </div>
         ) : (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-medium text-gray-900">
-                Assigned Complaints ({complaints.length})
-              </h2>
-            </div>
-
+            <h2 className="text-xl font-semibold text-gray-900">Assigned Complaints</h2>
             <div className="grid gap-6">
               {complaints.map((complaint) => (
                 <Card key={complaint.id} className="p-6">
                   <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center space-x-3">
-                      <span className="font-mono text-sm font-medium text-blue-600">
-                        {complaint.token}
-                      </span>
-                      <Badge className={getStatusColor(complaint.status)}>
-                        {complaint.status}
-                      </Badge>
-                      <Badge className={getUrgencyColor(complaint.urgency)} variant="outline">
-                        {complaint.urgency || 'medium'}
-                      </Badge>
-                    </div>
-                    <div className="text-right text-sm text-gray-500">
-                      <div>Assigned: {new Date(complaint.assigned_at || complaint.created_at).toLocaleDateString()}</div>
-                    </div>
-                  </div>
-
-                  <div className="mb-4">
-                    <h3 className="font-medium text-gray-900 mb-2">
-                      {complaint.category} - {complaint.subtype}
-                    </h3>
-                    <p className="text-gray-700 mb-3">{complaint.description}</p>
-                    
-                    {complaint.location_text && (
-                      <div className="flex items-center text-sm text-gray-500 mb-2">
-                        <MapPin className="w-4 h-4 mr-1" />
-                        {complaint.location_text}
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-3 mb-2">
+                        <h3 className="text-lg font-medium text-gray-900">
+                          {complaint.token}
+                        </h3>
+                        <Badge className={getStatusColor(complaint.status)}>
+                          {complaint.status.replace('_', ' ')}
+                        </Badge>
+                        <Badge className={getUrgencyColor(complaint.urgency || 'medium')}>
+                          {complaint.urgency || 'medium'}
+                        </Badge>
                       </div>
-                    )}
-
-                    <div className="flex items-center text-sm text-gray-500">
-                      <Calendar className="w-4 h-4 mr-1" />
-                      Created: {new Date(complaint.created_at).toLocaleString()}
-                    </div>
-                  </div>
-
-                  {/* Existing Reports */}
-                  {complaint.worker_reports && complaint.worker_reports.length > 0 && (
-                    <div className="mb-4 p-4 bg-gray-50 rounded-lg">
-                      <h4 className="font-medium text-gray-900 mb-2">Your Reports</h4>
-                      <div className="space-y-2">
-                        {complaint.worker_reports.map((report, index) => (
-                          <div key={report.id} className="text-sm">
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="font-medium">Report #{index + 1}</span>
-                              <Badge className={
-                                report.status === 'reviewed' ? 'bg-green-100 text-green-800' :
-                                report.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                                'bg-yellow-100 text-yellow-800'
-                              }>
-                                {report.status}
-                              </Badge>
-                            </div>
-                            <div className="text-gray-600">
-                              {new Date(report.created_at).toLocaleString()}
-                              {report.comments && (
-                                <div className="mt-1 italic">&ldquo;{report.comments}&rdquo;</div>
-                              )}
-                            </div>
-                            {report.photos.length > 0 && (
-                              <div className="mt-2 flex items-center text-xs text-gray-500">
-                                <Camera className="w-3 h-3 mr-1" />
-                                {report.photos.length} photo(s)
-                              </div>
-                            )}
+                      <p className="text-gray-600 mb-2">{complaint.description}</p>
+                      <div className="flex items-center space-x-4 text-sm text-gray-500">
+                        <div className="flex items-center">
+                          <MapPin className="h-4 w-4 mr-1" />
+                          {complaint.location_text || 'Location not specified'}
+                        </div>
+                        <div className="flex items-center">
+                          <Calendar className="h-4 w-4 mr-1" />
+                          {new Date(complaint.created_at).toLocaleDateString()}
+                        </div>
+                        {complaint.assigned_at && (
+                          <div className="flex items-center">
+                            <Clock className="h-4 w-4 mr-1" />
+                            Assigned {new Date(complaint.assigned_at).toLocaleDateString()}
                           </div>
-                        ))}
+                        )}
                       </div>
                     </div>
-                  )}
+                  </div>
 
                   {/* Attachments */}
                   {complaint.attachments && complaint.attachments.length > 0 && (
                     <div className="mb-4">
-                      <h4 className="font-medium text-gray-900 mb-2">Original Attachments</h4>
+                      <div className="flex items-center mb-2">
+                        <Camera className="h-4 w-4 mr-2 text-gray-500" />
+                        <span className="text-sm font-medium text-gray-700">Attachments</span>
+                      </div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         {complaint.attachments.map((attachment, index) => (
-                          <div key={index} className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
-                            <img
-                              src={`/api/attachments/public?key=${encodeURIComponent(attachment)}`}
-                              alt={`Attachment ${index + 1}`}
-                              className="w-full h-full object-cover cursor-pointer hover:opacity-90"
-                              onClick={() => window.open(`/api/attachments/public?key=${encodeURIComponent(attachment)}`, '_blank')}
-                            />
+                          <img
+                            key={index}
+                            src={`/api/attachments/public?key=${encodeURIComponent(attachment)}`}
+                            alt={`Attachment ${index + 1}`}
+                            className="w-full h-20 object-cover rounded border"
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Worker Reports */}
+                  {complaint.worker_reports && complaint.worker_reports.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-center mb-2">
+                        <FileText className="h-4 w-4 mr-2 text-gray-500" />
+                        <span className="text-sm font-medium text-gray-700">Your Reports</span>
+                      </div>
+                      <div className="space-y-2">
+                        {complaint.worker_reports.map((report) => (
+                          <div key={report.id} className="bg-gray-50 p-3 rounded">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-sm font-medium">
+                                Report #{report.id.slice(-8)}
+                              </span>
+                              <Badge className={getStatusColor(report.status)}>
+                                {report.status.replace('_', ' ')}
+                              </Badge>
+                            </div>
+                            {report.comments && (
+                              <p className="text-sm text-gray-600 mb-2">{report.comments}</p>
+                            )}
+                            {report.photos.length > 0 && (
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                {report.photos.map((photo, index) => (
+                                  <img
+                                    key={index}
+                                    src={`/api/attachments/public?key=${encodeURIComponent(photo)}`}
+                                    alt={`Report photo ${index + 1}`}
+                                    className="w-full h-16 object-cover rounded border"
+                                  />
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-xs text-gray-500 mt-2">
+                              Submitted {new Date(report.created_at).toLocaleString()}
+                            </p>
                           </div>
                         ))}
                       </div>
                     </div>
                   )}
 
-                  <div className="flex gap-2">
+                  {/* Action Button */}
+                  <div className="flex justify-end">
                     <Button
                       onClick={() => {
                         setSelectedComplaint(complaint);
@@ -255,37 +273,54 @@ export default function WorkerDashboard() {
                       }}
                       disabled={complaint.status === 'resolved'}
                     >
-                      <MessageSquare className="w-4 h-4 mr-2" />
-                      {complaint.worker_reports && complaint.worker_reports.length > 0 ? 'Add Report' : 'Submit Report'}
+                      {complaint.status === 'resolved' ? (
+                        <>
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                          Resolved
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="h-4 w-4 mr-2" />
+                          Submit Report
+                        </>
+                      )}
                     </Button>
-                    
-                    {complaint.lat && complaint.lng && (
-                      <Button
-                        variant="outline"
-                        onClick={() => window.open(`https://www.google.com/maps?q=${complaint.lat},${complaint.lng}`, '_blank')}
-                      >
-                        <MapPin className="w-4 h-4 mr-2" />
-                        View on Map
-                      </Button>
-                    )}
                   </div>
                 </Card>
               ))}
             </div>
           </div>
         )}
-      </div>
+      </main>
 
       {/* Report Form Modal */}
       {showReportForm && selectedComplaint && (
-        <WorkerReportForm
-          complaint={selectedComplaint}
-          onClose={() => {
-            setShowReportForm(false);
-            setSelectedComplaint(null);
-          }}
-          onSubmitted={handleReportSubmitted}
-        />
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-medium">Submit Report for {selectedComplaint.token}</h3>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowReportForm(false);
+                    setSelectedComplaint(null);
+                  }}
+                >
+                  ×
+                </Button>
+              </div>
+              <WorkerReportForm
+                complaint={selectedComplaint}
+                onClose={() => {
+                  setShowReportForm(false);
+                  setSelectedComplaint(null);
+                }}
+                onSubmitted={handleReportSubmitted}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

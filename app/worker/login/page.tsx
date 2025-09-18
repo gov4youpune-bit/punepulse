@@ -50,7 +50,7 @@ export default function WorkerLoginPage() {
                 </div>
               </div>
 
-              <SignInButton mode="modal">
+              <SignInButton mode="redirect">
                 <Button className="w-full">
                   <Shield className="w-4 h-4 mr-2" />
                   Sign In to Worker Portal
