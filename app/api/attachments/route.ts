@@ -2,8 +2,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import { NextResponse } from 'next/server';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 // Types for request/response
 interface SingleFileRequest {
@@ -47,7 +46,6 @@ interface BatchFileResponse {
  */
 export async function POST(req: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
     const body = await req.json();
 
     // Resolve bucket - use complaint-attachments bucket
@@ -55,9 +53,9 @@ export async function POST(req: Request) {
 
     // Check if this is a batch request
     if (body.files && Array.isArray(body.files)) {
-      return handleBatchUpload(supabase, bucket, body as BatchFileRequest);
+      return handleBatchUpload(supabaseAdmin, bucket, body as BatchFileRequest);
     } else {
-      return handleSingleUpload(supabase, bucket, body as SingleFileRequest);
+      return handleSingleUpload(supabaseAdmin, bucket, body as SingleFileRequest);
     }
   } catch (err) {
     console.error('Unexpected error in attachments route:', err);
