@@ -52,12 +52,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Complaint not assigned to you' }, { status: 403 });
     }
 
+    // Get worker ID from workers table
+    const { data: workerData, error: workerError } = await supabaseAdmin
+      .from('workers')
+      .select('id')
+      .eq('clerk_user_id', clerkUserId)
+      .single();
+
+    if (workerError || !workerData) {
+      console.error('[WORKER REPORT API] Worker not found:', workerError);
+      return NextResponse.json({ 
+        error: 'Worker not found in workers table' 
+      }, { status: 404 });
+    }
+
     // Create worker report
     const { data: report, error: reportError } = await supabaseAdmin
       .from('worker_reports')
       .insert({
         complaint_id,
-        worker_clerk_id: clerkUserId,
+        worker_id: workerData.id, // This was missing!
         comments: comments || null,
         photos: photos,
         status: 'submitted',
