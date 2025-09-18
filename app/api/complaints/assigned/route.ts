@@ -45,21 +45,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Debug: Check all assignments in the table
-    console.log('[ASSIGNED API] Checking all assignments in complaint_assignments table...');
-    const { data: allAssignments, error: allAssignmentsError } = await supabaseAdmin
-      .from('complaint_assignments')
-      .select('assigned_to_clerk_id, complaint_id, assigned_at')
-      .order('assigned_at', { ascending: false });
-    
-    if (allAssignmentsError) {
-      console.error('Error fetching all assignments:', allAssignmentsError);
-    } else {
-      console.log('[ASSIGNED API] All assignments:', allAssignments);
-      console.log('[ASSIGNED API] Looking for assignments with clerk_user_id:', clerkUserId);
-    }
-
-    // Get assigned complaints for this worker from complaint_assignments table
+    // SIMPLIFIED APPROACH: Get all complaints that are assigned to this user
+    // This works regardless of app_users table or complex role checks
     console.log('[ASSIGNED API] Fetching complaints for clerk user ID:', clerkUserId);
     
     const { data: assignments, error: assignmentsError } = await supabaseAdmin
@@ -100,9 +87,8 @@ export async function GET(request: NextRequest) {
     }
 
     console.log('[ASSIGNED API] Found assignments:', assignments?.length || 0);
-    console.log('[ASSIGNED API] Assignments data:', assignments);
 
-    // If no assignments found, return empty array (user might not be a worker or have no assignments)
+    // If no assignments found, return empty array
     if (!assignments || assignments.length === 0) {
       console.log('[ASSIGNED API] No assignments found for user:', clerkUserId);
       return NextResponse.json({ complaints: [] }, { status: 200 });

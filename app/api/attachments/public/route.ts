@@ -52,7 +52,9 @@ export async function GET(request: Request) {
     }
 
     console.log('[ATTACHMENTS API] Successfully generated signed URL for:', key);
-    return NextResponse.json({ url: data.signedUrl });
+    
+    // REDIRECT to the actual image URL instead of returning JSON
+    return NextResponse.redirect(data.signedUrl);
   } catch (err: any) {
     console.error('[API] /api/attachments/public error', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
