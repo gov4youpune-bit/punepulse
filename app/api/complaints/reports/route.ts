@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
+// Fix dynamic server usage error
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 interface WorkerReport {
   id: string;
   complaint_id: string;
