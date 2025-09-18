@@ -71,7 +71,8 @@ export async function POST(request: NextRequest) {
       .from('worker_reports')
       .insert({
         complaint_id,
-        worker_id: workerData.id, // This was missing!
+        worker_id: workerData.id,
+        worker_clerk_id: clerkUserId, // Also populate clerk ID
         comments: comments || null,
         photos: photos,
         status: 'submitted',

@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get worker reports with complaint and worker details
+    // Use worker_id for the join since that's what's populated
     const { data: reports, error: reportsError } = await supabaseAdmin
       .from('worker_reports')
       .select(`
@@ -64,10 +65,11 @@ export async function GET(request: NextRequest) {
           description,
           email
         ),
-        worker:workers (
+        worker:workers!worker_reports_worker_id_fkey (
           id,
           display_name,
-          email
+          email,
+          clerk_user_id
         )
       `)
       .in('status', ['submitted'])
