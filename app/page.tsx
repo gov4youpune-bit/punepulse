@@ -93,13 +93,13 @@ export default function HomePage() {
                   Sign up for better complaint tracking and email notifications
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3">
-                  <SignUpButton mode="modal">
+                  <SignUpButton>
                     <Button className="flex-1 bg-blue-600 hover:bg-blue-700">
                       <UserPlus className="w-4 h-4 mr-2" />
                       Sign Up
                     </Button>
                   </SignUpButton>
-                  <SignInButton mode="modal">
+                  <SignInButton>
                     <Button variant="outline" className="flex-1 border-blue-300 text-blue-700 hover:bg-blue-50">
                       <LogIn className="w-4 h-4 mr-2" />
                       Sign In
@@ -152,8 +152,8 @@ export default function HomePage() {
                 <p className="text-gray-500 mb-6">
                   Please sign up first to submit complaints
                 </p>
-                <SignUpButton mode="modal">
-                  <Button className="w-full" size="lg" disabled>
+                <SignUpButton>
+                  <Button className="w-full" size="lg">
                     <UserPlus className="w-5 h-5 mr-2" />
                     Sign Up Required
                   </Button>
