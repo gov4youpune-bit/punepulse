@@ -61,7 +61,8 @@ export async function GET(request: NextRequest) {
           token,
           category,
           subtype,
-          description
+          description,
+          email
         ),
         worker:workers (
           id,
@@ -69,7 +70,7 @@ export async function GET(request: NextRequest) {
           email
         )
       `)
-      .in('status', ['submitted', 'admin_verification_pending'])
+      .in('status', ['submitted'])
       .order('created_at', { ascending: false });
 
     if (reportsError) {

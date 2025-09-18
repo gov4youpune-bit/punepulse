@@ -662,14 +662,22 @@ export default function AdminDashboard() {
 
   // ---- Verification functions ----
   const handleVerify = async (complaintId: string, reportId?: string, action: 'verify' | 'reject' = 'verify') => {
+    if (!reportId) {
+      toast({ 
+        title: 'Error', 
+        description: 'Report ID is required for verification', 
+        variant: 'destructive' 
+      });
+      return;
+    }
+
     try {
       const res = await fetch('/api/complaints/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          complaint_id: complaintId,
           report_id: reportId,
-          action
+          action: action === 'verify' ? 'approve' : 'reject'
         })
       });
 
@@ -683,18 +691,28 @@ export default function AdminDashboard() {
       // Update complaint in state
       setComplaints(prev => prev.map(c => 
         c.id === complaintId 
-          ? { ...c, ...data.complaint }
+          ? { 
+              ...c, 
+              status: action === 'verify' ? 'resolved' : 'assigned',
+              verification_status: action === 'verify' ? 'verified' : 'rejected',
+              verified_at: action === 'verify' ? new Date().toISOString() : null
+            }
           : c
       ));
 
       // Update selected complaint if it's the same
       if (selectedComplaint?.id === complaintId) {
-        setSelectedComplaint({ ...selectedComplaint, ...data.complaint });
+        setSelectedComplaint({ 
+          ...selectedComplaint, 
+          status: action === 'verify' ? 'resolved' : 'assigned',
+          verification_status: action === 'verify' ? 'verified' : 'rejected',
+          verified_at: action === 'verify' ? new Date().toISOString() : null
+        });
       }
 
       toast({ 
-        title: action === 'verify' ? 'Verified' : 'Rejected', 
-        description: `Complaint ${action === 'verify' ? 'verified' : 'rejected'} successfully` 
+        title: action === 'verify' ? 'Approved' : 'Rejected', 
+        description: `Worker report ${action === 'verify' ? 'approved' : 'rejected'} successfully` 
       });
 
       // Refresh details if modal is open

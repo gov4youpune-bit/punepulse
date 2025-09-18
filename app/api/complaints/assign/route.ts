@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuth } from '@clerk/nextjs/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { sendEmail } from '@/lib/email';
+import { sendComplaintNotification } from '@/lib/email';
 
 interface AssignRequest {
   complaint_id: string;
@@ -103,20 +103,20 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (workerEmailData?.email) {
-        await sendEmail({
-          to: workerEmailData.email,
-          subject: 'New Complaint Assignment',
-          text: `New Complaint Assigned - ${updatedComplaint.token}`,
-          html: `
-            <h2>New Complaint Assigned</h2>
-            <p>You have been assigned a new complaint:</p>
-            <p><strong>Complaint ID:</strong> ${updatedComplaint.token}</p>
-            <p><strong>Category:</strong> ${updatedComplaint.category} - ${updatedComplaint.subtype}</p>
-            <p><strong>Description:</strong> ${updatedComplaint.description}</p>
-            <p><strong>Location:</strong> ${updatedComplaint.location_text || 'Not specified'}</p>
-            <p><strong>Priority:</strong> ${updatedComplaint.urgency || 'medium'}</p>
-            <p>Please log in to your worker dashboard to view and respond to this complaint.</p>
-          `
+        await sendComplaintNotification({
+          type: 'complaint_assigned',
+          complaint: {
+            id: updatedComplaint.id,
+            token: updatedComplaint.token,
+            category: updatedComplaint.category,
+            subtype: updatedComplaint.subtype,
+            description: updatedComplaint.description,
+            status: updatedComplaint.status,
+            urgency: updatedComplaint.urgency,
+            created_at: updatedComplaint.created_at,
+            email: workerEmailData.email,
+            location_text: updatedComplaint.location_text
+          }
         });
         console.log('[ASSIGN API] Email notification sent to:', workerEmailData.email);
       }

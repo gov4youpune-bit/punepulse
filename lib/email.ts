@@ -496,6 +496,85 @@ Pune Pulse Team
   return { subject, text, html };
 }
 
+function getComplaintAssignedTemplate(complaint: ComplaintData) {
+  const trackingUrl = getTrackingUrl(complaint.token);
+  const formattedDate = formatDate(complaint.created_at);
+
+  const subject = `New Complaint Assignment - ${complaint.token}`;
+  
+  const text = `
+You have been assigned a new complaint to resolve.
+
+Complaint Details:
+- Token: ${complaint.token}
+- Category: ${complaint.category} - ${complaint.subtype}
+- Submitted: ${formattedDate}
+- Priority: ${getUrgencyDisplay(complaint.urgency)}
+
+${complaint.description}
+
+Please log in to your worker dashboard to view and respond to this complaint.
+
+Best regards,
+Pune Pulse Team
+  `.trim();
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Complaint Assignment</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+    <h2 style="color: #d97706; margin-top: 0;">📋 New Complaint Assignment</h2>
+    <p>You have been assigned a new complaint to resolve.</p>
+  </div>
+
+  <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="margin-top: 0; color: #374151;">Complaint Details</h3>
+    <table style="width: 100%; border-collapse: collapse;">
+      <tr>
+        <td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Token:</td>
+        <td style="padding: 8px 0; font-family: monospace; color: #2563eb;">${complaint.token}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Category:</td>
+        <td style="padding: 8px 0;">${complaint.category} - ${complaint.subtype}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Submitted:</td>
+        <td style="padding: 8px 0;">${formattedDate}</td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; font-weight: bold; color: #6b7280;">Priority:</td>
+        <td style="padding: 8px 0; color: ${complaint.urgency === 'high' ? '#dc2626' : complaint.urgency === 'medium' ? '#d97706' : '#059669'}; font-weight: bold;">${getUrgencyDisplay(complaint.urgency)}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="margin-top: 0; color: #374151;">Description</h3>
+    <p style="white-space: pre-wrap;">${complaint.description}</p>
+  </div>
+
+  <div style="text-align: center; margin: 30px 0;">
+    <a href="${process.env.NEXT_PUBLIC_APP_URL}/worker/dashboard" style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">View Worker Dashboard</a>
+  </div>
+
+  <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px; text-align: center; color: #6b7280; font-size: 14px;">
+    <p>Please log in to your worker dashboard to view and respond to this complaint.</p>
+    <p>Best regards,<br>Pune Pulse Team</p>
+  </div>
+</body>
+</html>
+  `.trim();
+
+  return { subject, text, html };
+}
+
 // Main notification function
 export async function sendComplaintNotification({
   type,
@@ -520,6 +599,12 @@ export async function sendComplaintNotification({
         template = getComplaintStatusChangedTemplate(complaint, extra);
         break;
       case 'complaint_verified':
+        template = getComplaintVerifiedTemplate(complaint);
+        break;
+      case 'complaint_assigned':
+        template = getComplaintAssignedTemplate(complaint);
+        break;
+      case 'complaint_resolved':
         template = getComplaintVerifiedTemplate(complaint);
         break;
       default:

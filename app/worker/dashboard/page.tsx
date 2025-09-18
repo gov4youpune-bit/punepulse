@@ -70,7 +70,16 @@ export default function WorkerDashboard() {
       const data = await response.json();
       console.log('[WORKER DASHBOARD] Received data:', data);
       
-      setComplaints(data.complaints || []);
+      // Filter out complaints that have submitted reports (hide from worker dashboard)
+      const filteredComplaints = (data.complaints || []).filter((complaint: AssignedComplaint) => {
+        // Show complaint if it has no worker reports or all reports are rejected
+        const hasSubmittedReport = complaint.worker_reports?.some(report => 
+          report.status === 'submitted' || report.status === 'verified'
+        );
+        return !hasSubmittedReport;
+      });
+      
+      setComplaints(filteredComplaints);
     } catch (err: any) {
       console.error('[WORKER DASHBOARD] Error fetching complaints:', err);
       setError(err.message || 'Failed to fetch assigned complaints');
