@@ -52,11 +52,18 @@ export async function GET(request: NextRequest) {
     }
 
     // Get worker reports with complaint and worker details
-    // Use worker_id for the join since that's what's populated
     const { data: reports, error: reportsError } = await supabaseAdmin
       .from('worker_reports')
       .select(`
-        *,
+        id,
+        complaint_id,
+        worker_id,
+        worker_clerk_id,
+        comments,
+        photos,
+        status,
+        created_at,
+        updated_at,
         complaint:complaints (
           id,
           token,
@@ -65,7 +72,7 @@ export async function GET(request: NextRequest) {
           description,
           email
         ),
-        worker:workers!worker_reports_worker_id_fkey (
+        worker:workers (
           id,
           display_name,
           email,
@@ -79,6 +86,9 @@ export async function GET(request: NextRequest) {
       console.error('Fetch worker reports error:', reportsError);
       return NextResponse.json({ error: 'Failed to fetch worker reports' }, { status: 500 });
     }
+
+    console.log('[REPORTS API] Found reports:', reports?.length || 0);
+    console.log('[REPORTS API] Sample report:', reports?.[0]);
 
     const response: ReportsResponse = { reports: reports || [] };
     return NextResponse.json(response, { status: 200 });
